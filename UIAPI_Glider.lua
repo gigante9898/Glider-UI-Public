@@ -586,33 +586,38 @@ local function fillMark(holder, ctx, win)
 		})
 		if win.LogoTint ~= false then paint(img, {ImageColor3 = accentRole}) end
 	else
-		local deck = make("Frame", {
-			Name = "Deck",
-			Size = UDim2.new(0.86, 0, 0.16, 0),
-			Position = UDim2.new(0.07, 0, 0.3, 0),
-			Rotation = -12,
+		local wing = make("Frame", {
+			Name = "GliderWing",
+			Size = UDim2.new(0.12, 0, 0.90, 0),
+			Position = UDim2.new(0.60, 0, 0.43, 0),
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Rotation = -35,
 			BorderSizePixel = 0,
 			Parent = holder,
 		}, {BackgroundColor3 = accentRole}, {corner(3)})
-		local wl = make("Frame", {
-			Name = "WheelL",
-			Size = UDim2.new(0.22, 0, 0.22, 0),
-			Position = UDim2.new(0.18, 0, 0.58, 0),
+		local tail = make("Frame", {
+			Name = "GliderTail",
+			Size = UDim2.new(0.09, 0, 0.40, 0),
+			Position = UDim2.new(0.25, 0, 0.67, 0),
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Rotation = -35,
 			BorderSizePixel = 0,
 			Parent = holder,
-		}, {BackgroundColor3 = textRole}, {corner(99)})
-		local wr = make("Frame", {
-			Name = "WheelR",
-			Size = UDim2.new(0.22, 0, 0.22, 0),
-			Position = UDim2.new(0.6, 0, 0.58, 0),
+		}, {BackgroundColor3 = accentRole}, {corner(2)})
+		local body = make("Frame", {
+			Name = "GliderFuselage",
+			Size = UDim2.new(0.86, 0, 0.12, 0),
+			Position = UDim2.new(0.5, 0, 0.5, 0),
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Rotation = -35,
 			BorderSizePixel = 0,
 			Parent = holder,
 		}, {BackgroundColor3 = textRole}, {corner(99)})
 		restyle(holder, function()
-			if deck.Parent and wl.Parent and wr.Parent then
-				deck.BackgroundColor3 = CURRENT_THEME[accentRole]
-				wl.BackgroundColor3 = CURRENT_THEME[textRole]
-				wr.BackgroundColor3 = CURRENT_THEME[textRole]
+			if body.Parent and wing.Parent and tail.Parent then
+				body.BackgroundColor3 = CURRENT_THEME[textRole]
+				wing.BackgroundColor3 = CURRENT_THEME[accentRole]
+				tail.BackgroundColor3 = CURRENT_THEME[accentRole]
 			end
 		end)
 	end
