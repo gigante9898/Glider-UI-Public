@@ -558,6 +558,7 @@ local Library = {
 		Settings   = 87862881290117,
 		Config     = 105363416845572,
 		Search     = 79488727439532,
+		PaperPlane = 7734053039,
 		PlumeVane  = 109028262244405,
 		PlumeShaft = 124588188115353,
 		Grain      = 79377062140589,
@@ -572,13 +573,12 @@ local PAD = 14 -- inner left/right padding of a row
 local function asset(id) return type(id) == "number" and ("rbxassetid://" .. id) or id end
 
 -- Draws the window's mark into holder: the caller's Logo if set (tinted unless LogoTint = false),
--- else the Glider skate (deck + wheels, vectorial), else a diamond. ctx "Chrome" (rail, overlays) or "Page".
+-- else the Glider paper airplane. ctx "Chrome" (rail, overlays) or "Page".
 local function fillMark(holder, ctx, win)
 	for _, c in ipairs(holder:GetChildren()) do
 		if c:IsA("GuiObject") then c:Destroy() end
 	end
 	local accentRole = ctx == "Page" and "Accent" or "ChromeAccent"
-	local textRole = ctx == "Page" and "Text" or "ChromeText"
 	if win and win.Logo then
 		local img = create("ImageLabel", {
 			Name = "Logo", Image = asset(win.Logo), BackgroundTransparency = 1, ScaleType = Enum.ScaleType.Fit,
@@ -586,40 +586,17 @@ local function fillMark(holder, ctx, win)
 		})
 		if win.LogoTint ~= false then paint(img, {ImageColor3 = accentRole}) end
 	else
-		local wing = make("Frame", {
-			Name = "GliderWing",
-			Size = UDim2.new(0.12, 0, 0.90, 0),
-			Position = UDim2.new(0.60, 0, 0.43, 0),
+		local plane = create("ImageLabel", {
+			Name = "PaperPlane",
+			Image = asset(Library.Icons.PaperPlane),
+			BackgroundTransparency = 1,
+			ScaleType = Enum.ScaleType.Fit,
+			Size = UDim2.fromScale(1, 1),
 			AnchorPoint = Vector2.new(0.5, 0.5),
-			Rotation = -35,
-			BorderSizePixel = 0,
+			Position = UDim2.fromScale(0.5, 0.5),
 			Parent = holder,
-		}, {BackgroundColor3 = accentRole}, {corner(3)})
-		local tail = make("Frame", {
-			Name = "GliderTail",
-			Size = UDim2.new(0.09, 0, 0.40, 0),
-			Position = UDim2.new(0.25, 0, 0.67, 0),
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			Rotation = -35,
-			BorderSizePixel = 0,
-			Parent = holder,
-		}, {BackgroundColor3 = accentRole}, {corner(2)})
-		local body = make("Frame", {
-			Name = "GliderFuselage",
-			Size = UDim2.new(0.86, 0, 0.12, 0),
-			Position = UDim2.new(0.5, 0, 0.5, 0),
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			Rotation = -35,
-			BorderSizePixel = 0,
-			Parent = holder,
-		}, {BackgroundColor3 = textRole}, {corner(99)})
-		restyle(holder, function()
-			if body.Parent and wing.Parent and tail.Parent then
-				body.BackgroundColor3 = CURRENT_THEME[textRole]
-				wing.BackgroundColor3 = CURRENT_THEME[accentRole]
-				tail.BackgroundColor3 = CURRENT_THEME[accentRole]
-			end
-		end)
+		})
+		paint(plane, {ImageColor3 = accentRole})
 	end
 end
 
@@ -726,7 +703,7 @@ function Library.new(opts)
 	self.TabRail = rail
 
 	local brand = create("Frame", {Name = "Brand", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, BRAND_H - 12), ZIndex = 2, Parent = rail})
-	plume(brand, 26, "Chrome", {Position = UDim2.fromOffset(16, 17)}, self)
+	self.BrandMark = plume(brand, 26, "Chrome", {Position = UDim2.fromOffset(16, 17)}, self)
 	self.BrandLabel = label({
 		Text = self.Brand, FontFace = FONTS.Brand, TextSize = 24, Role = "ChromeText", TextTruncate = TRUNC,
 		Size = UDim2.new(1, -56, 0, 28), Position = UDim2.fromOffset(46, 16), Parent = brand,
@@ -1222,8 +1199,8 @@ function Library:_playIntro()
 		Name = "VaporL",
 		Size = UDim2.new(0, 0, 0, 2),
 		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(0.5, 20, 0.5, -20),
-		Rotation = -35,
+		Position = UDim2.new(0.5, -12, 0.5, 8),
+		Rotation = 45,
 		BorderSizePixel = 0,
 		BackgroundTransparency = 0.2,
 		Parent = flightBox,
@@ -1241,8 +1218,8 @@ function Library:_playIntro()
 		Name = "VaporR",
 		Size = UDim2.new(0, 0, 0, 2),
 		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(0.5, -20, 0.5, 20),
-		Rotation = -35,
+		Position = UDim2.new(0.5, 12, 0.5, 32),
+		Rotation = 45,
 		BorderSizePixel = 0,
 		BackgroundTransparency = 0.2,
 		Parent = flightBox,
@@ -1258,8 +1235,8 @@ function Library:_playIntro()
 
 	local mark = plume(flightBox, 64, "Chrome", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 120, 0.5, -110),
-		Rotation = -60,
+		Position = UDim2.new(0.5, -120, 0.5, 90),
+		Rotation = 25,
 	}, self)
 	local markScale = create("UIScale", {Scale = 0.45, Parent = mark})
 
@@ -1300,32 +1277,32 @@ function Library:_playIntro()
 			return cover.Parent ~= nil and not self.Unloaded and main.Parent ~= nil
 		end
 
-		-- Phase 1: Inbound supersonic flight & banking
+		-- Phase 1: Inbound paper airplane glide & banking
 		playSound("Slide")
 		for _, p in ipairs(parts) do tween(p[1], {[p[2]] = 0}, FAST) end
-		tween(markScale, {Scale = 1.0}, TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out))
+		tween(markScale, {Scale = 1.0}, TweenInfo.new(0.85, Enum.EasingStyle.Back, Enum.EasingDirection.Out))
 		tween(mark, {
 			Position = UDim2.new(0.5, 0, 0.5, 0),
-			Rotation = -35,
-		}, TweenInfo.new(0.55, Enum.EasingStyle.Quart, Enum.EasingDirection.Out))
+			Rotation = 0,
+		}, TweenInfo.new(0.85, Enum.EasingStyle.Quart, Enum.EasingDirection.Out))
 
 		tween(vaporL, {
-			Size = UDim2.new(0, 75, 0, 2),
-			Position = UDim2.new(0.5, 14, 0.5, -24),
-		}, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
+			Size = UDim2.new(0, 85, 0, 2),
+			Position = UDim2.new(0.5, -20, 0.5, 16),
+		}, TweenInfo.new(0.60, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
 		tween(vaporR, {
-			Size = UDim2.new(0, 75, 0, 2),
-			Position = UDim2.new(0.5, -24, 0.5, 14),
-		}, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
+			Size = UDim2.new(0, 85, 0, 2),
+			Position = UDim2.new(0.5, 4, 0.5, 40),
+		}, TweenInfo.new(0.60, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
 
-		task.delay(0.28, function()
+		task.delay(0.48, function()
 			if alive() then
-				tween(vaporL, {BackgroundTransparency = 1}, FAST)
-				tween(vaporR, {BackgroundTransparency = 1}, FAST)
+				tween(vaporL, {BackgroundTransparency = 1}, MED)
+				tween(vaporR, {BackgroundTransparency = 1}, MED)
 			end
 		end)
 
-		task.wait(0.48)
+		task.wait(0.72)
 		if not alive() then return end
 
 		-- Phase 2: Aerodynamic shockwave pulse on touchdown
@@ -1344,45 +1321,45 @@ function Library:_playIntro()
 			Transparency = 0.25,
 			Parent = pulse,
 		})
-		tween(pulse, {Size = UDim2.fromOffset(130, 130)}, TweenInfo.new(0.45, Enum.EasingStyle.Quart, Enum.EasingDirection.Out))
-		tween(stroke, {Transparency = 1}, TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.In))
-		task.delay(0.5, function() pcall(function() pulse:Destroy() end) end)
+		tween(pulse, {Size = UDim2.fromOffset(140, 140)}, TweenInfo.new(0.60, Enum.EasingStyle.Quart, Enum.EasingDirection.Out))
+		tween(stroke, {Transparency = 1}, TweenInfo.new(0.60, Enum.EasingStyle.Quad, Enum.EasingDirection.In))
+		task.delay(0.65, function() pcall(function() pulse:Destroy() end) end)
 
 		-- Phase 3: Brand typewriter & separator line expansion
-		task.wait(0.08)
+		task.wait(0.18)
 		if not alive() then return end
 		local n = utf8.len(self.Brand) or #self.Brand
 		for i = 1, n do
 			if not alive() then return end
 			word.MaxVisibleGraphemes = i
-			task.wait(0.038)
+			task.wait(0.048)
 		end
 		word.MaxVisibleGraphemes = -1
 
 		tween(dash, {Size = UDim2.fromOffset(36, 2), BackgroundTransparency = 0}, MED)
 		tween(caption, {Position = UDim2.new(0.5, 0, 0.5, 70), TextTransparency = 0}, MED)
 
-		task.wait(0.45)
+		task.wait(0.70)
 		if not alive() then return end
 
 		-- Phase 4: Slipstream Horizon Reveal
-		local lift = TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		local lift = TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
 		tween(word, {Position = UDim2.new(0.5, 0, 0.5, 18), TextTransparency = 1}, lift)
 		tween(dash, {BackgroundTransparency = 1}, lift)
 		tween(caption, {Position = UDim2.new(0.5, 0, 0.5, 62), TextTransparency = 1}, lift)
 		for _, p in ipairs(parts) do tween(p[1], {[p[2]] = 1}, lift) end
 
-		local expandInfo = TweenInfo.new(0.48, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+		local expandInfo = TweenInfo.new(0.65, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 		tween(main, {Size = finalSize}, expandInfo)
 		tween(cover, {BackgroundTransparency = 1}, expandInfo)
 
-		task.delay(0.12, function()
+		task.delay(0.18, function()
 			if alive() then
 				self:_openTabs()
 			end
 		end)
 
-		task.wait(0.50)
+		task.wait(0.70)
 		if not self.Unloaded and main.Parent then
 			main.AnchorPoint = Vector2.new(0.5, 0.5)
 			main.Position = pos
@@ -1728,6 +1705,20 @@ function Library:SetHideUsername(on)
 	if self._wmUserSep then self._wmUserSep.Visible = not self.HideUsername end
 end
 
+function Library:_animateBrandMark()
+	local mark = self.BrandMark
+	if not mark or not mark.Parent then return end
+	local scale = mark:FindFirstChild("BrandMarkScale")
+	if not scale then
+		scale = create("UIScale", {Name = "BrandMarkScale", Scale = 1, Parent = mark})
+	end
+	mark.Position = UDim2.fromOffset(8, 24)
+	mark.Rotation = -18
+	scale.Scale = 0.65
+	tween(mark, {Position = UDim2.fromOffset(16, 17), Rotation = 0}, TweenInfo.new(0.42, Enum.EasingStyle.Quart, Enum.EasingDirection.Out))
+	tween(scale, {Scale = 1}, TweenInfo.new(0.42, Enum.EasingStyle.Back, Enum.EasingDirection.Out))
+end
+
 function Library:SetVisible(v)
 	if v == self.Visible and self.Main.Visible == v then return end
 	self.Visible = v
@@ -1736,6 +1727,7 @@ function Library:SetVisible(v)
 		self.Scale.Scale = 0.96
 		tween(self.Scale, {Scale = 1}, SLIDE)
 		if self.MobileIcon then self.MobileIcon.Visible = false end
+		if self.BrandMark then self:_animateBrandMark() end
 	else
 		if self.Popup then self.Popup:Destroy(); self.Popup = nil end
 		self:CloseSearchModal(true)
