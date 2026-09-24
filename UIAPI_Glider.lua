@@ -4,7 +4,7 @@
 	Backend UI library. Original Feather by friend, now Glider owned.
 	==============================================================================
 	An ink-and-paper UI library for Roblox executors.
-	  - Themes: Ink (default), Parchment, Journal. Picked in Settings, saved globally
+	  - Themes: Ink (default), Sakura, Parchment, Journal. Picked in Settings, saved globally
 	  - Rail with tinted tab icons, a gliding active marker, pinned Settings/Config
 	  - Controls on ruled rows: capsule toggles, ruler sliders, dropdowns, pickers
 	  - Watermark, keybinds HUD, toasts, Ctrl+K search, mobile reopen button
@@ -47,6 +47,16 @@ local THEMES = {
 		ToastSuccess = rgb(134, 176, 126), ToastWarning = rgb(217, 165, 70), ToastError = rgb(217, 68, 82),
 		GrainTransparency = 0.92, Binding = false,
 	},
+	Sakura = {
+		ChromeBg = rgb(15, 12, 17), ChromeRaised = rgb(24, 18, 26), ChromeText = rgb(252, 248, 250),
+		ChromeSub = rgb(160, 142, 162), ChromeRule = rgb(42, 32, 48), ChromeAccent = rgb(255, 184, 210),
+		PageBg = rgb(15, 12, 17), PageRaised = rgb(24, 18, 26), Text = rgb(252, 248, 250), SubText = rgb(160, 142, 162),
+		Rule = rgb(42, 32, 48), Rule2 = rgb(60, 46, 68), Accent = rgb(255, 184, 210), Knob = rgb(24, 18, 26),
+		Hover = rgb(252, 248, 250), Edge = rgb(60, 46, 68),
+		Success = rgb(130, 225, 160), Warning = rgb(245, 195, 110), Danger = rgb(255, 95, 120),
+		ToastSuccess = rgb(130, 225, 160), ToastWarning = rgb(245, 195, 110), ToastError = rgb(255, 95, 120),
+		GrainTransparency = 0.92, Binding = false,
+	},
 	Parchment = {
 		ChromeBg = rgb(232, 223, 204), ChromeRaised = rgb(241, 234, 220), ChromeText = rgb(33, 28, 22),
 		ChromeSub = rgb(98, 88, 72), ChromeRule = rgb(212, 200, 177), ChromeAccent = rgb(198, 63, 28),
@@ -68,7 +78,7 @@ local THEMES = {
 		GrainTransparency = 0.92, Binding = true,
 	},
 }
-local THEME_ORDER = {"Ink", "Parchment", "Journal"}
+local THEME_ORDER = {"Ink", "Sakura", "Parchment", "Journal"}
 local CURRENT_THEME = THEMES.Ink
 
 -- ---------------------------------------------------------------------------
