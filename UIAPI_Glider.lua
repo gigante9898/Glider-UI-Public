@@ -558,7 +558,7 @@ local Library = {
 		Settings   = 87862881290117,
 		Config     = 105363416845572,
 		Search     = 79488727439532,
-		PaperPlane = 7734053039,
+		PaperPlane = 131122221118848,
 		PlumeVane  = 109028262244405,
 		PlumeShaft = 124588188115353,
 		Grain      = 79377062140589,
@@ -1190,55 +1190,17 @@ function Library:_playIntro()
 		Name = "FlightBox",
 		Size = UDim2.fromOffset(260, 180),
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 0, 0.5, -42),
+		Position = UDim2.new(0.5, 0, 0.5, -36),
 		BackgroundTransparency = 1,
 		Parent = cover,
 	})
 
-	local vaporL = make("Frame", {
-		Name = "VaporL",
-		Size = UDim2.new(0, 0, 0, 2),
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(0.5, -12, 0.5, 8),
-		Rotation = 45,
-		BorderSizePixel = 0,
-		BackgroundTransparency = 0.2,
-		Parent = flightBox,
-	}, {BackgroundColor3 = "ChromeAccent"}, {corner(1)})
-	create("UIGradient", {
-		Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 1),
-			NumberSequenceKeypoint.new(0.7, 0.15),
-			NumberSequenceKeypoint.new(1, 0),
-		}),
-		Parent = vaporL,
-	})
-
-	local vaporR = make("Frame", {
-		Name = "VaporR",
-		Size = UDim2.new(0, 0, 0, 2),
-		AnchorPoint = Vector2.new(1, 0.5),
-		Position = UDim2.new(0.5, 12, 0.5, 32),
-		Rotation = 45,
-		BorderSizePixel = 0,
-		BackgroundTransparency = 0.2,
-		Parent = flightBox,
-	}, {BackgroundColor3 = "ChromeAccent"}, {corner(1)})
-	create("UIGradient", {
-		Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 1),
-			NumberSequenceKeypoint.new(0.7, 0.15),
-			NumberSequenceKeypoint.new(1, 0),
-		}),
-		Parent = vaporR,
-	})
-
 	local mark = plume(flightBox, 64, "Chrome", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, -120, 0.5, 90),
-		Rotation = 25,
+		Position = UDim2.new(0.5, -90, 0.5, 70),
+		Rotation = 18,
 	}, self)
-	local markScale = create("UIScale", {Scale = 0.45, Parent = mark})
+	local markScale = create("UIScale", {Scale = 0.5, Parent = mark})
 
 	local parts = {}
 	for _, c in ipairs(mark:GetChildren()) do
@@ -1253,19 +1215,19 @@ function Library:_playIntro()
 
 	local word = label({
 		Text = self.Brand, FontFace = FONTS.Brand, TextSize = 40, TextScaled = true, Role = "ChromeText",
-		TextXAlignment = CENTER, MaxVisibleGraphemes = 0, AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 0, 0.5, 26), Size = UDim2.new(1, -40, 0, 46), Parent = cover,
+		TextXAlignment = CENTER, TextTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, 34), Size = UDim2.new(1, -40, 0, 46), Parent = cover,
 	}, {create("UITextSizeConstraint", {MaxTextSize = 40})})
 
 	local dash = make("Frame", {
-		Size = UDim2.fromOffset(0, 2), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 56),
+		Size = UDim2.fromOffset(0, 2), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 64),
 		BackgroundTransparency = 1, BorderSizePixel = 0, Parent = cover,
 	}, {BackgroundColor3 = "ChromeAccent"}, {corner(1)})
 
 	local caption = label({
 		Text = track(self.Title), FontFace = FONTS.BodySemi, TextSize = 10, Role = "ChromeSub", TextXAlignment = CENTER,
 		TextTruncate = TRUNC, TextTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 0, 0.5, 76), Size = UDim2.new(1, -40, 0, 12), Parent = cover,
+		Position = UDim2.new(0.5, 0, 0.5, 80), Size = UDim2.new(1, -40, 0, 12), Parent = cover,
 	})
 
 	task.spawn(function()
@@ -1277,38 +1239,22 @@ function Library:_playIntro()
 			return cover.Parent ~= nil and not self.Unloaded and main.Parent ~= nil
 		end
 
-		-- Phase 1: Inbound paper airplane glide & banking
+		-- Step 1: Smooth gliding entry into center
 		playSound("Slide")
-		for _, p in ipairs(parts) do tween(p[1], {[p[2]] = 0}, FAST) end
-		tween(markScale, {Scale = 1.0}, TweenInfo.new(0.85, Enum.EasingStyle.Back, Enum.EasingDirection.Out))
+		for _, p in ipairs(parts) do tween(p[1], {[p[2]] = 0}, MED) end
+		tween(markScale, {Scale = 1.0}, TweenInfo.new(0.70, Enum.EasingStyle.Back, Enum.EasingDirection.Out))
 		tween(mark, {
 			Position = UDim2.new(0.5, 0, 0.5, 0),
 			Rotation = 0,
-		}, TweenInfo.new(0.85, Enum.EasingStyle.Quart, Enum.EasingDirection.Out))
+		}, TweenInfo.new(0.70, Enum.EasingStyle.Quart, Enum.EasingDirection.Out))
 
-		tween(vaporL, {
-			Size = UDim2.new(0, 85, 0, 2),
-			Position = UDim2.new(0.5, -20, 0.5, 16),
-		}, TweenInfo.new(0.60, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
-		tween(vaporR, {
-			Size = UDim2.new(0, 85, 0, 2),
-			Position = UDim2.new(0.5, 4, 0.5, 40),
-		}, TweenInfo.new(0.60, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
-
-		task.delay(0.48, function()
-			if alive() then
-				tween(vaporL, {BackgroundTransparency = 1}, MED)
-				tween(vaporR, {BackgroundTransparency = 1}, MED)
-			end
-		end)
-
-		task.wait(0.72)
+		-- Step 2: Gentle bloom pulse & Brand text glide
+		task.wait(0.35)
 		if not alive() then return end
 
-		-- Phase 2: Aerodynamic shockwave pulse on touchdown
 		local pulse = make("Frame", {
-			Name = "ShockRing",
-			Size = UDim2.fromOffset(8, 8),
+			Name = "BloomRing",
+			Size = UDim2.fromOffset(12, 12),
 			AnchorPoint = Vector2.new(0.5, 0.5),
 			Position = UDim2.new(0.5, 0, 0.5, 0),
 			BackgroundTransparency = 1,
@@ -1318,48 +1264,49 @@ function Library:_playIntro()
 		local stroke = create("UIStroke", {
 			Color = CURRENT_THEME.ChromeAccent,
 			Thickness = 2,
-			Transparency = 0.25,
+			Transparency = 0.2,
 			Parent = pulse,
 		})
-		tween(pulse, {Size = UDim2.fromOffset(140, 140)}, TweenInfo.new(0.60, Enum.EasingStyle.Quart, Enum.EasingDirection.Out))
-		tween(stroke, {Transparency = 1}, TweenInfo.new(0.60, Enum.EasingStyle.Quad, Enum.EasingDirection.In))
-		task.delay(0.65, function() pcall(function() pulse:Destroy() end) end)
+		tween(pulse, {Size = UDim2.fromOffset(130, 130)}, TweenInfo.new(0.55, Enum.EasingStyle.Quart, Enum.EasingDirection.Out))
+		tween(stroke, {Transparency = 1}, TweenInfo.new(0.55, Enum.EasingStyle.Quad, Enum.EasingDirection.In))
+		task.delay(0.60, function() pcall(function() pulse:Destroy() end) end)
 
-		-- Phase 3: Brand typewriter & separator line expansion
-		task.wait(0.18)
-		if not alive() then return end
-		local n = utf8.len(self.Brand) or #self.Brand
-		for i = 1, n do
-			if not alive() then return end
-			word.MaxVisibleGraphemes = i
-			task.wait(0.048)
-		end
-		word.MaxVisibleGraphemes = -1
+		tween(word, {Position = UDim2.new(0.5, 0, 0.5, 24), TextTransparency = 0}, MED)
+		tween(dash, {Size = UDim2.fromOffset(40, 2), BackgroundTransparency = 0}, MED)
+		tween(caption, {Position = UDim2.new(0.5, 0, 0.5, 72), TextTransparency = 0}, MED)
 
-		tween(dash, {Size = UDim2.fromOffset(36, 2), BackgroundTransparency = 0}, MED)
-		tween(caption, {Position = UDim2.new(0.5, 0, 0.5, 70), TextTransparency = 0}, MED)
-
-		task.wait(0.70)
+		-- Step 3: Readability pause
+		task.wait(0.65)
 		if not alive() then return end
 
-		-- Phase 4: Slipstream Horizon Reveal
-		local lift = TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-		tween(word, {Position = UDim2.new(0.5, 0, 0.5, 18), TextTransparency = 1}, lift)
+		-- Step 4: The Takeoff & Horizon Expansion
+		local flyOut = TweenInfo.new(0.42, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+		tween(mark, {Position = UDim2.new(0.5, 240, 0.5, -200), Rotation = 15}, flyOut)
+		tween(markScale, {Scale = 1.3}, flyOut)
+		for _, p in ipairs(parts) do tween(p[1], {[p[2]] = 1}, TweenInfo.new(0.38, Enum.EasingStyle.Quad, Enum.EasingDirection.In)) end
+
+		local lift = TweenInfo.new(0.30, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		tween(word, {Position = UDim2.new(0.5, 0, 0.5, 14), TextTransparency = 1}, lift)
 		tween(dash, {BackgroundTransparency = 1}, lift)
-		tween(caption, {Position = UDim2.new(0.5, 0, 0.5, 62), TextTransparency = 1}, lift)
-		for _, p in ipairs(parts) do tween(p[1], {[p[2]] = 1}, lift) end
+		tween(caption, {Position = UDim2.new(0.5, 0, 0.5, 60), TextTransparency = 1}, lift)
 
-		local expandInfo = TweenInfo.new(0.65, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+		task.wait(0.12)
+		if not alive() then return end
+
+		local expandInfo = TweenInfo.new(0.55, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
 		tween(main, {Size = finalSize}, expandInfo)
 		tween(cover, {BackgroundTransparency = 1}, expandInfo)
 
-		task.delay(0.18, function()
+		task.delay(0.14, function()
 			if alive() then
 				self:_openTabs()
+				if self.BrandMark then
+					self:_animateBrandMark()
+				end
 			end
 		end)
 
-		task.wait(0.70)
+		task.wait(0.60)
 		if not self.Unloaded and main.Parent then
 			main.AnchorPoint = Vector2.new(0.5, 0.5)
 			main.Position = pos
