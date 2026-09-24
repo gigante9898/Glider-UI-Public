@@ -4,7 +4,7 @@
 	Backend UI library. Original Feather by friend, now Glider owned.
 	==============================================================================
 	An ink-and-paper UI library for Roblox executors.
-	  - Themes: Ink (default), Sakura, Parchment, Journal. Picked in Settings, saved globally
+	  - Themes: Sakura (default), Ink, Parchment, Journal. Picked in Settings, saved globally
 	  - Rail with tinted tab icons, a gliding active marker, pinned Settings/Config
 	  - Controls on ruled rows: capsule toggles, ruler sliders, dropdowns, pickers
 	  - Watermark, keybinds HUD, toasts, Ctrl+K search, mobile reopen button
@@ -37,6 +37,16 @@ local IS_MOBILE   = UIS.TouchEnabled and not UIS.KeyboardEnabled
 -- ---------------------------------------------------------------------------
 local rgb = Color3.fromRGB
 local THEMES = {
+	Sakura = {
+		ChromeBg = rgb(14, 10, 16), ChromeRaised = rgb(24, 17, 26), ChromeText = rgb(252, 248, 250),
+		ChromeSub = rgb(172, 146, 170), ChromeRule = rgb(48, 35, 54), ChromeAccent = rgb(255, 125, 172),
+		PageBg = rgb(16, 12, 18), PageRaised = rgb(27, 20, 31), Text = rgb(252, 248, 250), SubText = rgb(172, 146, 170),
+		Rule = rgb(46, 34, 52), Rule2 = rgb(72, 52, 82), Accent = rgb(255, 115, 168), Knob = rgb(20, 14, 24),
+		Hover = rgb(255, 140, 185), Edge = rgb(72, 52, 82),
+		Success = rgb(130, 225, 160), Warning = rgb(255, 195, 110), Danger = rgb(255, 95, 120),
+		ToastSuccess = rgb(130, 225, 160), ToastWarning = rgb(255, 195, 110), ToastError = rgb(255, 95, 120),
+		GrainTransparency = 0.92, Binding = false,
+	},
 	Ink = {
 		ChromeBg = rgb(21, 18, 15), ChromeRaised = rgb(28, 24, 20), ChromeText = rgb(236, 228, 212),
 		ChromeSub = rgb(138, 128, 114), ChromeRule = rgb(38, 33, 28), ChromeAccent = rgb(229, 86, 47),
@@ -45,16 +55,6 @@ local THEMES = {
 		Hover = rgb(236, 228, 212), Edge = rgb(44, 38, 33),
 		Success = rgb(134, 176, 126), Warning = rgb(217, 165, 70), Danger = rgb(217, 68, 82),
 		ToastSuccess = rgb(134, 176, 126), ToastWarning = rgb(217, 165, 70), ToastError = rgb(217, 68, 82),
-		GrainTransparency = 0.92, Binding = false,
-	},
-	Sakura = {
-		ChromeBg = rgb(15, 12, 17), ChromeRaised = rgb(24, 18, 26), ChromeText = rgb(252, 248, 250),
-		ChromeSub = rgb(160, 142, 162), ChromeRule = rgb(42, 32, 48), ChromeAccent = rgb(255, 184, 210),
-		PageBg = rgb(15, 12, 17), PageRaised = rgb(24, 18, 26), Text = rgb(252, 248, 250), SubText = rgb(160, 142, 162),
-		Rule = rgb(42, 32, 48), Rule2 = rgb(60, 46, 68), Accent = rgb(255, 184, 210), Knob = rgb(24, 18, 26),
-		Hover = rgb(252, 248, 250), Edge = rgb(60, 46, 68),
-		Success = rgb(130, 225, 160), Warning = rgb(245, 195, 110), Danger = rgb(255, 95, 120),
-		ToastSuccess = rgb(130, 225, 160), ToastWarning = rgb(245, 195, 110), ToastError = rgb(255, 95, 120),
 		GrainTransparency = 0.92, Binding = false,
 	},
 	Parchment = {
@@ -78,8 +78,8 @@ local THEMES = {
 		GrainTransparency = 0.92, Binding = true,
 	},
 }
-local THEME_ORDER = {"Ink", "Sakura", "Parchment", "Journal"}
-local CURRENT_THEME = THEMES.Ink
+local THEME_ORDER = {"Sakura", "Ink", "Parchment", "Journal"}
+local CURRENT_THEME = THEMES.Sakura
 
 -- ---------------------------------------------------------------------------
 -- FONTS (Roblox built-in families; a missing face falls back to the closest one)
@@ -645,7 +645,7 @@ local RAIL_W, BRAND_H = 176, 84
 function Library.new(opts)
 	opts = opts or {}
 	local saved = Storage.loadTheme()
-	local themeName = (saved and THEMES[saved] and saved) or (opts.Theme and THEMES[opts.Theme] and opts.Theme) or "Ink"
+	local themeName = (saved and THEMES[saved] and saved) or (opts.Theme and THEMES[opts.Theme] and opts.Theme) or "Sakura"
 	CURRENT_THEME = THEMES[themeName]
 	Library.Theme = CURRENT_THEME
 
@@ -1139,7 +1139,7 @@ function Library:SetTheme(themeNameOrTbl)
 	if type(themeNameOrTbl) == "string" then
 		newTheme, name = THEMES[themeNameOrTbl], themeNameOrTbl
 	elseif type(themeNameOrTbl) == "table" then
-		newTheme = table.clone(THEMES.Ink) -- a custom table is merged over Ink so no role is ever nil
+		newTheme = table.clone(THEMES.Sakura) -- a custom table is merged over Sakura so no role is ever nil
 		for k, v in pairs(themeNameOrTbl) do newTheme[k] = v end
 		name = "Custom"
 	end
