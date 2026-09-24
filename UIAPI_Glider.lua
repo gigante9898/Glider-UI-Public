@@ -562,34 +562,49 @@ local PAD = 14 -- inner left/right padding of a row
 local function asset(id) return type(id) == "number" and ("rbxassetid://" .. id) or id end
 
 -- Draws the window's mark into holder: the caller's Logo if set (tinted unless LogoTint = false),
--- else the two-layer Plume (vane, shaft), else a diamond. ctx "Chrome" (rail, overlays) or "Page".
+-- else the Glider skate (deck + wheels, vectorial), else a diamond. ctx "Chrome" (rail, overlays) or "Page".
 local function fillMark(holder, ctx, win)
 	for _, c in ipairs(holder:GetChildren()) do
 		if c:IsA("GuiObject") then c:Destroy() end
 	end
 	local accentRole = ctx == "Page" and "Accent" or "ChromeAccent"
 	local textRole = ctx == "Page" and "Text" or "ChromeText"
-	local icons = Library.Icons
 	if win and win.Logo then
 		local img = create("ImageLabel", {
 			Name = "Logo", Image = asset(win.Logo), BackgroundTransparency = 1, ScaleType = Enum.ScaleType.Fit,
 			Size = UDim2.fromScale(1, 1), Parent = holder,
 		})
 		if win.LogoTint ~= false then paint(img, {ImageColor3 = accentRole}) end
-	elseif icons.PlumeVane and icons.PlumeShaft then
-		make("ImageLabel", {
-			Name = "Vane", Image = asset(icons.PlumeVane), BackgroundTransparency = 1,
-			Size = UDim2.fromScale(1, 1), Parent = holder,
-		}, {ImageColor3 = accentRole})
-		make("ImageLabel", {
-			Name = "Shaft", Image = asset(icons.PlumeShaft), BackgroundTransparency = 1,
-			Size = UDim2.fromScale(1, 1), ZIndex = 2, Parent = holder,
-		}, {ImageColor3 = textRole})
 	else
-		make("Frame", {
-			Size = UDim2.fromScale(0.42, 0.42), Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5),
-			Rotation = 45, BorderSizePixel = 0, Parent = holder,
-		}, {BackgroundColor3 = accentRole})
+		local deck = make("Frame", {
+			Name = "Deck",
+			Size = UDim2.new(0.86, 0, 0.16, 0),
+			Position = UDim2.new(0.07, 0, 0.3, 0),
+			Rotation = -12,
+			BorderSizePixel = 0,
+			Parent = holder,
+		}, {BackgroundColor3 = accentRole}, {corner(3)})
+		local wl = make("Frame", {
+			Name = "WheelL",
+			Size = UDim2.new(0.22, 0, 0.22, 0),
+			Position = UDim2.new(0.18, 0, 0.58, 0),
+			BorderSizePixel = 0,
+			Parent = holder,
+		}, {BackgroundColor3 = textRole}, {corner(99)})
+		local wr = make("Frame", {
+			Name = "WheelR",
+			Size = UDim2.new(0.22, 0, 0.22, 0),
+			Position = UDim2.new(0.6, 0, 0.58, 0),
+			BorderSizePixel = 0,
+			Parent = holder,
+		}, {BackgroundColor3 = textRole}, {corner(99)})
+		restyle(holder, function()
+			if deck.Parent and wl.Parent and wr.Parent then
+				deck.BackgroundColor3 = CURRENT_THEME[accentRole]
+				wl.BackgroundColor3 = CURRENT_THEME[textRole]
+				wr.BackgroundColor3 = CURRENT_THEME[textRole]
+			end
+		end)
 	end
 end
 
