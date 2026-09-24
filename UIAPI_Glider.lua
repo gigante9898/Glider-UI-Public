@@ -1176,44 +1176,94 @@ function Library:SetTheme(themeNameOrTbl)
 end
 
 -- ---------------------------------------------------------------------------
--- STARTUP: the window starts folded, as a tall panel in the middle of the screen
--- showing the mark while the brand writes itself in. Then it unfolds like paper:
--- the left flap swings open toward the left to reveal the tabs, and the right side
--- widens. The middle panel never moves, so the open window ends up centred.
+-- INTRO ANIMATION
+-- Aerodynamic Glider sequence:
+-- 1. Inbound flight: Glider swoops diagonally from top-right with banking
+--    rotation and twin wingtip vapor trails.
+-- 2. Deceleration & Shockwave: Flares smoothly to rest, emitting an expanding
+--    aerodynamic vapor ring.
+-- 3. Brand typing & accent expansion under the docked mark.
+-- 4. Slipstream Horizon Reveal: Symmetrically expands to full window size
+--    and lifts the cover to seamlessly reveal the tabs and pages.
 -- ---------------------------------------------------------------------------
 function Library:_playIntro()
 	local main, page, rail = self.Main, self.PageArea, self.TabRail
 	local finalSize = main.Size
 	local fullW, fullH = finalSize.X.Offset, finalSize.Y.Offset
-	local mid = math.max(fullW - 2 * RAIL_W, 200) -- the folded panel; the right side grows by the rest
-	local grow = fullW - RAIL_W - mid
+	local midW = math.clamp(fullW - RAIL_W, 360, 480)
 	local pos = main.Position
 
-	-- Lays the window out for flap progress a (0 folded, 1 flat) and right-side progress b.
-	-- The hinge sits at the folded panel's left edge, which stays fixed on screen.
-	local cover, flap, crease
-	local function layoutAt(a, b)
-		local h = RAIL_W * a
-		main.Position = UDim2.new(pos.X.Scale, pos.X.Offset - mid / 2 - h, pos.Y.Scale, pos.Y.Offset)
-		main.Size = UDim2.fromOffset(h + mid + grow * b, fullH)
-		rail.Position = UDim2.fromOffset(h - RAIL_W, 0)
-		page.Position = UDim2.fromOffset(h, 0)
-		if cover then cover.Position = UDim2.fromOffset(h, 0) end
-		if flap then flap.Size = UDim2.new(0, h, 1, 0) end
-		if crease then crease.Position = UDim2.fromOffset(h, 0) end
-	end
+	main.AnchorPoint = Vector2.new(0.5, 0.5)
+	main.Position = pos
+	main.Size = UDim2.fromOffset(midW, fullH)
 
-	main.AnchorPoint = Vector2.new(0, 0.5)
-	page.Size = UDim2.new(0, fullW - RAIL_W, 1, 0) -- final width up front: content is revealed, never squashed
+	rail.Position = UDim2.fromOffset(0, 0)
+	page.Position = UDim2.fromOffset(RAIL_W, 0)
+	page.Size = UDim2.new(1, -RAIL_W, 1, 0)
 
-	cover = make("Frame", {
-		Name = "Intro", Size = UDim2.new(0, mid, 1, 0), BorderSizePixel = 0, ZIndex = 40, Parent = main,
+	local cover = make("Frame", {
+		Name = "IntroCover",
+		Size = UDim2.fromScale(1, 1),
+		BorderSizePixel = 0,
+		ZIndex = 40,
+		Parent = main,
 	}, {BackgroundColor3 = "ChromeBg"}, {corner(6)})
-	layoutAt(0, 0)
 
-	local mark = plume(cover, 60, "Chrome", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, -46)}, self)
-	local markScale = create("UIScale", {Scale = 0.9, Parent = mark})
-	local parts = {} -- {instance, transparency property} for everything on the cover
+	local flightBox = create("Frame", {
+		Name = "FlightBox",
+		Size = UDim2.fromOffset(260, 180),
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, -42),
+		BackgroundTransparency = 1,
+		Parent = cover,
+	})
+
+	local vaporL = make("Frame", {
+		Name = "VaporL",
+		Size = UDim2.new(0, 0, 0, 2),
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(0.5, 20, 0.5, -20),
+		Rotation = -35,
+		BorderSizePixel = 0,
+		BackgroundTransparency = 0.2,
+		Parent = flightBox,
+	}, {BackgroundColor3 = "ChromeAccent"}, {corner(1)})
+	create("UIGradient", {
+		Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1),
+			NumberSequenceKeypoint.new(0.7, 0.15),
+			NumberSequenceKeypoint.new(1, 0),
+		}),
+		Parent = vaporL,
+	})
+
+	local vaporR = make("Frame", {
+		Name = "VaporR",
+		Size = UDim2.new(0, 0, 0, 2),
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(0.5, -20, 0.5, 20),
+		Rotation = -35,
+		BorderSizePixel = 0,
+		BackgroundTransparency = 0.2,
+		Parent = flightBox,
+	}, {BackgroundColor3 = "ChromeAccent"}, {corner(1)})
+	create("UIGradient", {
+		Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, 1),
+			NumberSequenceKeypoint.new(0.7, 0.15),
+			NumberSequenceKeypoint.new(1, 0),
+		}),
+		Parent = vaporR,
+	})
+
+	local mark = plume(flightBox, 64, "Chrome", {
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 120, 0.5, -110),
+		Rotation = -60,
+	}, self)
+	local markScale = create("UIScale", {Scale = 0.45, Parent = mark})
+
+	local parts = {}
 	for _, c in ipairs(mark:GetChildren()) do
 		if c:IsA("ImageLabel") then
 			c.ImageTransparency = 1
@@ -1223,107 +1273,125 @@ function Library:_playIntro()
 			table.insert(parts, {c, "BackgroundTransparency"})
 		end
 	end
+
 	local word = label({
 		Text = self.Brand, FontFace = FONTS.Brand, TextSize = 40, TextScaled = true, Role = "ChromeText",
 		TextXAlignment = CENTER, MaxVisibleGraphemes = 0, AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 0, 0.5, 16), Size = UDim2.new(1, -40, 0, 46), Parent = cover,
+		Position = UDim2.new(0.5, 0, 0.5, 26), Size = UDim2.new(1, -40, 0, 46), Parent = cover,
 	}, {create("UITextSizeConstraint", {MaxTextSize = 40})})
+
 	local dash = make("Frame", {
-		Size = UDim2.fromOffset(18, 1), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 50),
+		Size = UDim2.fromOffset(0, 2), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 56),
 		BackgroundTransparency = 1, BorderSizePixel = 0, Parent = cover,
-	}, {BackgroundColor3 = "ChromeAccent"})
+	}, {BackgroundColor3 = "ChromeAccent"}, {corner(1)})
+
 	local caption = label({
 		Text = track(self.Title), FontFace = FONTS.BodySemi, TextSize = 10, Role = "ChromeSub", TextXAlignment = CENTER,
 		TextTruncate = TRUNC, TextTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 0, 0.5, 64), Size = UDim2.new(1, -40, 0, 12), Parent = cover,
+		Position = UDim2.new(0.5, 0, 0.5, 76), Size = UDim2.new(1, -40, 0, 12), Parent = cover,
 	})
 
 	task.spawn(function()
 		pcall(function() ContentProvider:PreloadAsync({word, caption, self.PageTitle}) end)
 	end)
 
-	for _, p in ipairs(parts) do tween(p[1], {[p[2]] = 0}, MED) end
-	tween(markScale, {Scale = 1}, SLIDE)
-
 	task.spawn(function()
-		local function alive() return cover.Parent ~= nil and not self.Unloaded end
+		local function alive()
+			return cover.Parent ~= nil and not self.Unloaded and main.Parent ~= nil
+		end
 
-		-- the brand writes itself in under the mark
-		task.wait(0.3)
+		-- Phase 1: Inbound supersonic flight & banking
+		playSound("Slide")
+		for _, p in ipairs(parts) do tween(p[1], {[p[2]] = 0}, FAST) end
+		tween(markScale, {Scale = 1.0}, TweenInfo.new(0.55, Enum.EasingStyle.Back, Enum.EasingDirection.Out))
+		tween(mark, {
+			Position = UDim2.new(0.5, 0, 0.5, 0),
+			Rotation = -35,
+		}, TweenInfo.new(0.55, Enum.EasingStyle.Quart, Enum.EasingDirection.Out))
+
+		tween(vaporL, {
+			Size = UDim2.new(0, 75, 0, 2),
+			Position = UDim2.new(0.5, 14, 0.5, -24),
+		}, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
+		tween(vaporR, {
+			Size = UDim2.new(0, 75, 0, 2),
+			Position = UDim2.new(0.5, -24, 0.5, 14),
+		}, TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
+
+		task.delay(0.28, function()
+			if alive() then
+				tween(vaporL, {BackgroundTransparency = 1}, FAST)
+				tween(vaporR, {BackgroundTransparency = 1}, FAST)
+			end
+		end)
+
+		task.wait(0.48)
+		if not alive() then return end
+
+		-- Phase 2: Aerodynamic shockwave pulse on touchdown
+		local pulse = make("Frame", {
+			Name = "ShockRing",
+			Size = UDim2.fromOffset(8, 8),
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.new(0.5, 0, 0.5, 0),
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			Parent = flightBox,
+		}, {}, {corner(99)})
+		local stroke = create("UIStroke", {
+			Color = CURRENT_THEME.ChromeAccent,
+			Thickness = 2,
+			Transparency = 0.25,
+			Parent = pulse,
+		})
+		tween(pulse, {Size = UDim2.fromOffset(130, 130)}, TweenInfo.new(0.45, Enum.EasingStyle.Quart, Enum.EasingDirection.Out))
+		tween(stroke, {Transparency = 1}, TweenInfo.new(0.45, Enum.EasingStyle.Quad, Enum.EasingDirection.In))
+		task.delay(0.5, function() pcall(function() pulse:Destroy() end) end)
+
+		-- Phase 3: Brand typewriter & separator line expansion
+		task.wait(0.08)
+		if not alive() then return end
 		local n = utf8.len(self.Brand) or #self.Brand
 		for i = 1, n do
 			if not alive() then return end
 			word.MaxVisibleGraphemes = i
-			task.wait(0.055)
+			task.wait(0.038)
 		end
 		word.MaxVisibleGraphemes = -1
-		tween(dash, {BackgroundTransparency = 0}, MED)
-		tween(caption, {TextTransparency = 0}, MED)
-		task.wait(0.55)
+
+		tween(dash, {Size = UDim2.fromOffset(36, 2), BackgroundTransparency = 0}, MED)
+		tween(caption, {Position = UDim2.new(0.5, 0, 0.5, 70), TextTransparency = 0}, MED)
+
+		task.wait(0.45)
 		if not alive() then return end
 
-		-- The left flap: a sheet in the rail's colour, shaded while it swings flat.
-		flap = make("Frame", {
-			Name = "Flap", Size = UDim2.new(0, 0, 1, 0), BorderSizePixel = 0, ZIndex = 35, Parent = main,
-		}, {BackgroundColor3 = "ChromeBg"}, {corner(6)})
-		local flapEdge = make("Frame", { -- squares the flap's hinge side
-			AnchorPoint = Vector2.new(1, 0), Position = UDim2.fromScale(1, 0), Size = UDim2.new(0, 6, 1, 0),
-			BorderSizePixel = 0, Parent = flap,
-		}, {BackgroundColor3 = "ChromeBg"})
-		local shade = create("Frame", {
-			Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 0.35,
-			BorderSizePixel = 0, ZIndex = 2, Parent = flap,
-		}, {create("UIGradient", {Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0),
-			NumberSequenceKeypoint.new(1, 0.6),
-		})})})
-		crease = create("Frame", {
-			Name = "Crease", Size = UDim2.new(0, 1, 1, 0), BackgroundColor3 = Color3.new(0, 0, 0),
-			BackgroundTransparency = 0.6, BorderSizePixel = 0, ZIndex = 36, Parent = main,
-		})
-
-		local lift = TweenInfo.new(0.35, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-		tween(cover, {BackgroundTransparency = 1}, lift)
-		for _, p in ipairs(parts) do tween(p[1], {[p[2]] = 1}, lift) end
-		tween(word, {TextTransparency = 1}, lift)
-		tween(caption, {TextTransparency = 1}, lift)
+		-- Phase 4: Slipstream Horizon Reveal
+		local lift = TweenInfo.new(0.28, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+		tween(word, {Position = UDim2.new(0.5, 0, 0.5, 18), TextTransparency = 1}, lift)
 		tween(dash, {BackgroundTransparency = 1}, lift)
+		tween(caption, {Position = UDim2.new(0.5, 0, 0.5, 62), TextTransparency = 1}, lift)
+		for _, p in ipairs(parts) do tween(p[1], {[p[2]] = 1}, lift) end
 
-		local function ease(x, style, dir)
-			return TweenService:GetValue(math.clamp(x, 0, 1), style, dir)
-		end
-		local FOLD, WIDEN, WIDEN_AT = 0.6, 0.65, 0.15
-		local t, tabsOpened, flapLifted = 0, false, false
-		while t < WIDEN_AT + WIDEN do
-			t += RunService.RenderStepped:Wait() or (1 / 60)
-			if self.Unloaded or not main.Parent then return end
-			local a = ease(t / FOLD, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-			local b = ease((t - WIDEN_AT) / WIDEN, Enum.EasingStyle.Quint, Enum.EasingDirection.InOut)
-			layoutAt(a, b)
-			shade.BackgroundTransparency = 0.35 + 0.65 * a
-			if not tabsOpened and t >= FOLD - 0.15 then
-				tabsOpened = true
+		local expandInfo = TweenInfo.new(0.48, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+		tween(main, {Size = finalSize}, expandInfo)
+		tween(cover, {BackgroundTransparency = 1}, expandInfo)
+
+		task.delay(0.12, function()
+			if alive() then
 				self:_openTabs()
 			end
-			if not flapLifted and t >= FOLD then
-				flapLifted = true -- flat now: lift the sheet off the real rail underneath
-				tween(flap, {BackgroundTransparency = 1}, lift)
-				tween(flapEdge, {BackgroundTransparency = 1}, lift)
-				tween(crease, {BackgroundTransparency = 1}, lift)
-			end
-		end
+		end)
 
-		-- hand back to the normal layout
-		main.AnchorPoint = Vector2.new(0.5, 0.5)
-		main.Position = pos
-		main.Size = finalSize
-		rail.Position = UDim2.fromOffset(0, 0)
-		page.Position = UDim2.fromOffset(RAIL_W, 0)
-		page.Size = UDim2.new(1, -RAIL_W, 1, 0)
-		cover:Destroy()
-		task.wait(0.36)
-		flap:Destroy()
-		crease:Destroy()
+		task.wait(0.50)
+		if not self.Unloaded and main.Parent then
+			main.AnchorPoint = Vector2.new(0.5, 0.5)
+			main.Position = pos
+			main.Size = finalSize
+			rail.Position = UDim2.fromOffset(0, 0)
+			page.Position = UDim2.fromOffset(RAIL_W, 0)
+			page.Size = UDim2.new(1, -RAIL_W, 1, 0)
+		end
+		pcall(function() cover:Destroy() end)
 	end)
 end
 
