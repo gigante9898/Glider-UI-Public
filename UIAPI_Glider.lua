@@ -909,6 +909,12 @@ function Library.new(opts)
 	if opts.Config ~= false then self:AddConfigTab(opts.ConfigName, opts.ConfigIcon) end
 	self:_refreshConfigStatus()
 
+	task.defer(function()
+		if not self.Unloaded and not self._autoloadDone and opts.AutoLoad ~= false then
+			self:AutoLoad()
+		end
+	end)
+
 	if getgenv then getgenv()[GLOBAL_KEY] = self end
 	return self
 end
@@ -3380,10 +3386,13 @@ function Library:Apply(data)
 end
 
 function Library:AutoLoad()
+	if self._autoloadDone then return end
 	local n = Storage.getAutoload()
 	if not n then return end
+	if self.ActiveConfig == n then return end
 	local data = Storage.load(n)
 	if not data then return end
+	self._autoloadDone = true
 	local count = self:Apply(data)
 	self.ActiveConfig = n
 	if self.RefreshConfigList then self.RefreshConfigList() end
