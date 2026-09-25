@@ -1669,15 +1669,15 @@ function Library:_animateBrandMark()
 	brandAnimToken += 1
 	local myToken = brandAnimToken
 
-	-- Aerodynamic Swoop Flight Path:
-	-- P0: Enters from the right side of the menu inside the page (X = 320, Y = 140)
-	-- P1: Flight control apex (X = 140, Y = 50)
+	-- Aerodynamic Diagonal Entrance Flight Path:
+	-- P0: Enters diagonally from the lower-left edge (clipped outside Main) (X = -45, Y = 280)
+	-- P1: Flight control apex (X = -5, Y = 115)
 	-- P2: Soft landing dock (X = 29, Y = 30)
-	local p0 = Vector2.new(320, 140)
-	local p1 = Vector2.new(140, 50)
+	local p0 = Vector2.new(-45, 280)
+	local p1 = Vector2.new(-5, 115)
 	local p2 = Vector2.new(29, 30)
 
-	local duration = 0.55
+	local duration = 0.52
 	local elapsed = 0
 
 	task.spawn(function()
@@ -1695,15 +1695,16 @@ function Library:_animateBrandMark()
 
 			local dx = 2 * u * (p1.X - p0.X) + 2 * t * (p2.X - p1.X)
 			local dy = 2 * u * (p1.Y - p0.Y) + 2 * t * (p2.Y - p1.Y)
-			local headingAngle = math.deg(math.atan2(dy, dx)) + 45
-			local rot = headingAngle * (1 - (t ^ 2))
+			local flightAngle = math.deg(math.atan2(dy, dx))
+			local idealRot = flightAngle + 41
+			local rot = idealRot * (1 - (t ^ 1.8))
 
 			mark.Position = UDim2.fromOffset(x, y)
 			mark.Rotation = rot
-			scale.Scale = 0.45 + 0.55 * (t ^ 0.7)
+			scale.Scale = 0.55 + 0.45 * (t ^ 0.7)
 
 			if plane then
-				plane.ImageTransparency = math.clamp(1 - linearT * 4, 0, 1)
+				plane.ImageTransparency = math.clamp(1 - linearT * 3.5, 0, 1)
 			end
 		end
 
