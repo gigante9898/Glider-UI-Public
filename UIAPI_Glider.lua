@@ -691,7 +691,7 @@ function Library.new(opts)
 	-- RAIL: brand, tab list, pinned tabs, config status
 	-- -----------------------------------------------------------------------
 	local rail = make("Frame", {
-		Name = "Rail", Size = UDim2.new(0, RAIL_W, 1, 0), BorderSizePixel = 0, Parent = self.Main,
+		Name = "Rail", Size = UDim2.new(0, RAIL_W, 1, 0), BorderSizePixel = 0, ClipsDescendants = true, Parent = self.Main,
 	}, {BackgroundColor3 = "ChromeBg"}, {corner(6)})
 	make("Frame", { -- squares off the rail's right-hand corners
 		Size = UDim2.new(0, 8, 1, 0), Position = UDim2.new(1, -8, 0, 0), BorderSizePixel = 0, Parent = rail,
@@ -702,8 +702,8 @@ function Library.new(opts)
 	}, {BackgroundColor3 = "ChromeRule"})
 	self.TabRail = rail
 
-	local brand = create("Frame", {Name = "Brand", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, BRAND_H - 12), ZIndex = 2, Parent = rail})
-	self.BrandMark = plume(brand, 26, "Chrome", {Position = UDim2.fromOffset(16, 17)}, self)
+	local brand = create("Frame", {Name = "Brand", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, BRAND_H - 12), ClipsDescendants = true, ZIndex = 2, Parent = rail})
+	self.BrandMark = plume(brand, 26, "Chrome", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(29, 30)}, self)
 	self.BrandLabel = label({
 		Text = self.Brand, FontFace = FONTS.Brand, TextSize = 24, Role = "ChromeText", TextTruncate = TRUNC,
 		Size = UDim2.new(1, -56, 0, 28), Position = UDim2.fromOffset(46, 16), Parent = brand,
@@ -1659,11 +1659,23 @@ function Library:_animateBrandMark()
 	if not scale then
 		scale = create("UIScale", {Name = "BrandMarkScale", Scale = 1, Parent = mark})
 	end
-	mark.Position = UDim2.fromOffset(8, 24)
-	mark.Rotation = -18
-	scale.Scale = 0.65
-	tween(mark, {Position = UDim2.fromOffset(16, 17), Rotation = 0}, TweenInfo.new(0.42, Enum.EasingStyle.Quart, Enum.EasingDirection.Out))
-	tween(scale, {Scale = 1}, TweenInfo.new(0.42, Enum.EasingStyle.Back, Enum.EasingDirection.Out))
+	local plane = mark:FindFirstChild("PaperPlane") or mark:FindFirstChildOfClass("ImageLabel")
+
+	mark.AnchorPoint = Vector2.new(0.5, 0.5)
+	mark.Position = UDim2.fromOffset(16, 56)
+	mark.Rotation = -24
+	scale.Scale = 0.55
+	if plane then plane.ImageTransparency = 1 end
+
+	local glideInfo = TweenInfo.new(0.48, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
+	local scaleInfo = TweenInfo.new(0.48, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+	local fadeInfo  = TweenInfo.new(0.20, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+
+	tween(mark, {Position = UDim2.fromOffset(29, 30), Rotation = 0}, glideInfo)
+	tween(scale, {Scale = 1}, scaleInfo)
+	if plane then
+		tween(plane, {ImageTransparency = 0}, fadeInfo)
+	end
 end
 
 function Library:SetVisible(v)
