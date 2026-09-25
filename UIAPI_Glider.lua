@@ -1190,7 +1190,7 @@ function Library:_playIntro()
 		Name = "FlightBox",
 		Size = UDim2.fromOffset(260, 180),
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 0, 0.5, -36),
+		Position = UDim2.new(0.5, 0, 0.5, -48),
 		BackgroundTransparency = 1,
 		Parent = cover,
 	})
@@ -1214,20 +1214,20 @@ function Library:_playIntro()
 	end
 
 	local word = label({
-		Text = self.Brand, FontFace = FONTS.Brand, TextSize = 40, TextScaled = true, Role = "ChromeText",
+		Text = self.Brand, FontFace = FONTS.Brand, TextSize = 36, TextScaled = true, Role = "ChromeText",
 		TextXAlignment = CENTER, TextTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 0, 0.5, 34), Size = UDim2.new(1, -40, 0, 46), Parent = cover,
-	}, {create("UITextSizeConstraint", {MaxTextSize = 40})})
+		Position = UDim2.new(0.5, 0, 0.5, 38), Size = UDim2.new(1, -40, 0, 36), Parent = cover,
+	}, {create("UITextSizeConstraint", {MaxTextSize = 36})})
 
 	local dash = make("Frame", {
-		Size = UDim2.fromOffset(0, 2), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 64),
+		Size = UDim2.fromOffset(0, 2), AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, 0, 0.5, 54),
 		BackgroundTransparency = 1, BorderSizePixel = 0, Parent = cover,
 	}, {BackgroundColor3 = "ChromeAccent"}, {corner(1)})
 
 	local caption = label({
 		Text = track(self.Title), FontFace = FONTS.BodySemi, TextSize = 10, Role = "ChromeSub", TextXAlignment = CENTER,
 		TextTruncate = TRUNC, TextTransparency = 1, AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 0, 0.5, 80), Size = UDim2.new(1, -40, 0, 12), Parent = cover,
+		Position = UDim2.new(0.5, 0, 0.5, 74), Size = UDim2.new(1, -40, 0, 12), Parent = cover,
 	})
 
 	task.spawn(function()
@@ -1267,13 +1267,13 @@ function Library:_playIntro()
 			Transparency = 0.2,
 			Parent = pulse,
 		})
-		tween(pulse, {Size = UDim2.fromOffset(130, 130)}, TweenInfo.new(0.55, Enum.EasingStyle.Quart, Enum.EasingDirection.Out))
+		tween(pulse, {Size = UDim2.fromOffset(102, 102)}, TweenInfo.new(0.55, Enum.EasingStyle.Quart, Enum.EasingDirection.Out))
 		tween(stroke, {Transparency = 1}, TweenInfo.new(0.55, Enum.EasingStyle.Quad, Enum.EasingDirection.In))
 		task.delay(0.60, function() pcall(function() pulse:Destroy() end) end)
 
-		tween(word, {Position = UDim2.new(0.5, 0, 0.5, 24), TextTransparency = 0}, MED)
+		tween(word, {Position = UDim2.new(0.5, 0, 0.5, 28), TextTransparency = 0}, MED)
 		tween(dash, {Size = UDim2.fromOffset(40, 2), BackgroundTransparency = 0}, MED)
-		tween(caption, {Position = UDim2.new(0.5, 0, 0.5, 72), TextTransparency = 0}, MED)
+		tween(caption, {Position = UDim2.new(0.5, 0, 0.5, 68), TextTransparency = 0}, MED)
 
 		-- Step 3: Readability pause
 		task.wait(0.65)
@@ -1286,9 +1286,9 @@ function Library:_playIntro()
 		for _, p in ipairs(parts) do tween(p[1], {[p[2]] = 1}, TweenInfo.new(0.38, Enum.EasingStyle.Quad, Enum.EasingDirection.In)) end
 
 		local lift = TweenInfo.new(0.30, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-		tween(word, {Position = UDim2.new(0.5, 0, 0.5, 14), TextTransparency = 1}, lift)
+		tween(word, {Position = UDim2.new(0.5, 0, 0.5, 18), TextTransparency = 1}, lift)
 		tween(dash, {BackgroundTransparency = 1}, lift)
-		tween(caption, {Position = UDim2.new(0.5, 0, 0.5, 60), TextTransparency = 1}, lift)
+		tween(caption, {Position = UDim2.new(0.5, 0, 0.5, 58), TextTransparency = 1}, lift)
 
 		task.wait(0.12)
 		if not alive() then return end
