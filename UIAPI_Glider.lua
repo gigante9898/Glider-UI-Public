@@ -691,7 +691,7 @@ function Library.new(opts)
 	-- RAIL: brand, tab list, pinned tabs, config status
 	-- -----------------------------------------------------------------------
 	local rail = make("Frame", {
-		Name = "Rail", Size = UDim2.new(0, RAIL_W, 1, 0), BorderSizePixel = 0, ClipsDescendants = true, Parent = self.Main,
+		Name = "Rail", Size = UDim2.new(0, RAIL_W, 1, 0), BorderSizePixel = 0, Parent = self.Main,
 	}, {BackgroundColor3 = "ChromeBg"}, {corner(6)})
 	make("Frame", { -- squares off the rail's right-hand corners
 		Size = UDim2.new(0, 8, 1, 0), Position = UDim2.new(1, -8, 0, 0), BorderSizePixel = 0, Parent = rail,
@@ -702,8 +702,8 @@ function Library.new(opts)
 	}, {BackgroundColor3 = "ChromeRule"})
 	self.TabRail = rail
 
-	local brand = create("Frame", {Name = "Brand", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, BRAND_H - 12), ClipsDescendants = true, ZIndex = 2, Parent = rail})
-	self.BrandMark = plume(brand, 26, "Chrome", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(29, 30)}, self)
+	local brand = create("Frame", {Name = "Brand", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, BRAND_H - 12), ZIndex = 15, Parent = rail})
+	self.BrandMark = plume(brand, 26, "Chrome", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(29, 30), ZIndex = 20}, self)
 	self.BrandLabel = label({
 		Text = self.Brand, FontFace = FONTS.Brand, TextSize = 24, Role = "ChromeText", TextTruncate = TRUNC,
 		Size = UDim2.new(1, -56, 0, 28), Position = UDim2.fromOffset(46, 16), Parent = brand,
@@ -1652,6 +1652,7 @@ function Library:SetHideUsername(on)
 	if self._wmUserSep then self._wmUserSep.Visible = not self.HideUsername end
 end
 
+local brandAnimToken = 0
 function Library:_animateBrandMark()
 	local mark = self.BrandMark
 	if not mark or not mark.Parent then return end
@@ -1662,20 +1663,57 @@ function Library:_animateBrandMark()
 	local plane = mark:FindFirstChild("PaperPlane") or mark:FindFirstChildOfClass("ImageLabel")
 
 	mark.AnchorPoint = Vector2.new(0.5, 0.5)
-	mark.Position = UDim2.fromOffset(16, 56)
-	mark.Rotation = -24
-	scale.Scale = 0.55
-	if plane then plane.ImageTransparency = 1 end
+	mark.ZIndex = 25
+	if plane then plane.ZIndex = 26 end
 
-	local glideInfo = TweenInfo.new(0.48, Enum.EasingStyle.Quart, Enum.EasingDirection.Out)
-	local scaleInfo = TweenInfo.new(0.48, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-	local fadeInfo  = TweenInfo.new(0.20, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+	brandAnimToken += 1
+	local myToken = brandAnimToken
 
-	tween(mark, {Position = UDim2.fromOffset(29, 30), Rotation = 0}, glideInfo)
-	tween(scale, {Scale = 1}, scaleInfo)
-	if plane then
-		tween(plane, {ImageTransparency = 0}, fadeInfo)
-	end
+	-- Aerodynamic Swoop Flight Path:
+	-- P0: Enters from the right side of the menu inside the page (X = 320, Y = 140)
+	-- P1: Flight control apex (X = 140, Y = 50)
+	-- P2: Soft landing dock (X = 29, Y = 30)
+	local p0 = Vector2.new(320, 140)
+	local p1 = Vector2.new(140, 50)
+	local p2 = Vector2.new(29, 30)
+
+	local duration = 0.55
+	local elapsed = 0
+
+	task.spawn(function()
+		while elapsed < duration do
+			local dt = RunService.RenderStepped:Wait()
+			if brandAnimToken ~= myToken or not mark or not mark.Parent then return end
+			elapsed = math.min(duration, elapsed + dt)
+
+			local linearT = elapsed / duration
+			local t = 1 - (1 - linearT) ^ 4 -- EaseOutQuart aerodynamic glide
+
+			local u = 1 - t
+			local x = u * u * p0.X + 2 * u * t * p1.X + t * t * p2.X
+			local y = u * u * p0.Y + 2 * u * t * p1.Y + t * t * p2.Y
+
+			local dx = 2 * u * (p1.X - p0.X) + 2 * t * (p2.X - p1.X)
+			local dy = 2 * u * (p1.Y - p0.Y) + 2 * t * (p2.Y - p1.Y)
+			local headingAngle = math.deg(math.atan2(dy, dx)) + 45
+			local rot = headingAngle * (1 - (t ^ 2))
+
+			mark.Position = UDim2.fromOffset(x, y)
+			mark.Rotation = rot
+			scale.Scale = 0.45 + 0.55 * (t ^ 0.7)
+
+			if plane then
+				plane.ImageTransparency = math.clamp(1 - linearT * 4, 0, 1)
+			end
+		end
+
+		if brandAnimToken == myToken and mark and mark.Parent then
+			mark.Position = UDim2.fromOffset(p2.X, p2.Y)
+			mark.Rotation = 0
+			scale.Scale = 1.0
+			if plane then plane.ImageTransparency = 0 end
+		end
+	end)
 end
 
 function Library:SetVisible(v)
