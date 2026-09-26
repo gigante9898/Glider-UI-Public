@@ -946,9 +946,10 @@ function Library.new(opts)
 	self.Main.Visible = true -- opens through the book animation rather than SetVisible's pop
 	self:_playIntro()
 
-	-- Pinned Tabs (Settings & Config)
+	-- Pinned Tabs (Settings, Config & Discord)
 	if opts.Settings ~= false then self:_buildSettingsTab(opts.SettingsName, opts.SettingsIcon) end
 	if opts.Config ~= false then self:AddConfigTab(opts.ConfigName, opts.ConfigIcon) end
+	if opts.Discord ~= false then self:AddDiscordTab(opts.DiscordName, opts.DiscordIcon) end
 	self:_refreshConfigStatus()
 
 	if getgenv then getgenv()[GLOBAL_KEY] = self end
@@ -1640,7 +1641,20 @@ function Library:_buildSettingsTab(name, icon)
 			self:UpdateKeybindHUD()
 		end,
 	})
-	tab:AddSection("Discord & Services")
+	local unloadRow = tab:AddButton({
+		Name = "Unload " .. self.Brand,
+		Danger = true,
+		Callback = function() self:Unload() end,
+	})
+	self._unloadLabel = unloadRow:FindFirstChild("Label")
+	return tab
+end
+
+function Library:AddDiscordTab(name, icon)
+	local tab = self:AddTab(name or "Discord", icon or Library.Icons.Misc, true)
+	self.DiscordTab = tab
+
+	tab:AddSection("Community & Custom Scripts")
 	local discRow = row(tab, 54)
 	label({
 		Text = "Discord: jirxy_2", FontFace = FONTS.Heading, TextSize = 14, Role = "Text",
@@ -1674,45 +1688,6 @@ function Library:_buildSettingsTab(name, icon)
 			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
 			if clipFn then pcall(clipFn, "jirxy_2") end
 			self:Notify({Title = "Support", Body = "Discord 'jirxy_2' copied! DM for any issue or questions.", Type = "Info"})
-		end,
-	})
-
-	local unloadRow = tab:AddButton({
-		Name = "Unload " .. self.Brand,
-		Danger = true,
-		Callback = function() self:Unload() end,
-	})
-	self._unloadLabel = unloadRow:FindFirstChild("Label")
-	return tab
-end
-
-function Library:AddDiscordTab(title)
-	local tab = self:AddTab(title or "Discord", Library.Icons.Misc)
-	tab:AddSection("Discord & Commissions")
-	tab:AddLabel("Developer Contact: jirxy_2")
-	tab:AddLabel("Custom scripts from +5EUR. DM for any issue or custom requests.")
-	tab:AddButton({
-		Name = "Copy Discord (jirxy_2)",
-		Callback = function()
-			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
-			if clipFn then pcall(clipFn, "jirxy_2") end
-			self:Notify({Title = "Discord", Body = "Copied 'jirxy_2' to clipboard!", Type = "Success"})
-		end,
-	})
-	tab:AddButton({
-		Name = "Order Custom Script (+5 EUR)",
-		Callback = function()
-			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
-			if clipFn then pcall(clipFn, "jirxy_2") end
-			self:Notify({Title = "Commissions", Body = "Copied 'jirxy_2'! DM on Discord for custom scripts (+5EUR).", Type = "Info"})
-		end,
-	})
-	tab:AddButton({
-		Name = "DM for Any Issue / Support",
-		Callback = function()
-			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
-			if clipFn then pcall(clipFn, "jirxy_2") end
-			self:Notify({Title = "Support", Body = "Copied 'jirxy_2'! DM for help or questions.", Type = "Info"})
 		end,
 	})
 	return tab
@@ -2052,7 +2027,7 @@ end
 -- ---------------------------------------------------------------------------
 -- TABS & SUBTABS
 -- ---------------------------------------------------------------------------
-local PINNED_GLYPHS = {Settings = "§", Config = "¶"}
+local PINNED_GLYPHS = {Settings = "§", Config = "¶", Discord = "@"}
 
 function Library:AddTab(name, icon, pinned)
 	local tab = setmetatable({Name = name, Window = self, Pinned = pinned or false, _secCount = 0}, Tab)
