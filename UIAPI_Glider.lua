@@ -145,9 +145,19 @@ local function connect(signal, fn)
 end
 
 local function tween(obj, props, info)
-	local t = TweenService:Create(obj, info or FAST, props)
-	t:Play()
-	return t
+	if not obj then return nil end
+	local ok, t = pcall(function()
+		return TweenService:Create(obj, info or FAST, props)
+	end)
+	if ok and t then
+		pcall(function() t:Play() end)
+		return t
+	else
+		for k, v in pairs(props) do
+			pcall(function() obj[k] = v end)
+		end
+		return nil
+	end
 end
 
 -- Tween when info is given, otherwise set the properties straight away.
@@ -1650,48 +1660,6 @@ function Library:_buildSettingsTab(name, icon)
 	return tab
 end
 
-function Library:AddDiscordTab(name, icon)
-	local tab = self:AddTab(name or "Discord", icon or Library.Icons.Misc, true)
-	self.DiscordTab = tab
-
-	tab:AddSection("Community & Custom Scripts")
-	local discRow = row(tab, 54)
-	label({
-		Text = "Discord: jirxy_2", FontFace = FONTS.Heading, TextSize = 14, Role = "Text",
-		Size = UDim2.new(1, -120, 0, 18), Position = UDim2.fromOffset(PAD, 8), Parent = discRow,
-	})
-	label({
-		Text = "Custom scripts (+5EUR) - DM for any issue or requests", FontFace = FONTS.Italic, TextSize = 12, Role = "SubText",
-		Size = UDim2.new(1, -120, 0, 16), Position = UDim2.fromOffset(PAD, 28), Parent = discRow,
-	})
-	local copyBtn = textButton(discRow, "Copy Tag", "primary", 1)
-	copyBtn.AnchorPoint = Vector2.new(1, 0.5)
-	copyBtn.Position = UDim2.new(1, -PAD, 0.5, 0)
-	copyBtn.MouseButton1Click:Connect(function()
-		playSound("Click")
-		local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
-		if clipFn then pcall(clipFn, "jirxy_2") end
-		self:Notify({Title = "Discord Copied", Body = "jirxy_2 copied! Custom scripts (+5EUR) or DM for issues.", Type = "Success"})
-	end)
-
-	tab:AddButton({
-		Name = "Custom Scripts: +5EUR (DM jirxy_2)",
-		Callback = function()
-			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
-			if clipFn then pcall(clipFn, "jirxy_2") end
-			self:Notify({Title = "Commissions", Body = "Discord 'jirxy_2' copied! Contact for custom commissions.", Type = "Info"})
-		end,
-	})
-	tab:AddButton({
-		Name = "Report Issue / Support (DM jirxy_2)",
-		Callback = function()
-			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
-			if clipFn then pcall(clipFn, "jirxy_2") end
-			self:Notify({Title = "Support", Body = "Discord 'jirxy_2' copied! DM for any issue or questions.", Type = "Info"})
-		end,
-	})
-	return tab
-end
 
 -- ---------------------------------------------------------------------------
 -- OPEN / CLOSE & VISIBILITY
@@ -3708,6 +3676,40 @@ function Library:AddConfigTab(name, icon)
 	clearLink.MouseButton1Click:Connect(function() playSound("Click"); actions["Clear Autoload"]() end)
 
 	refreshList()
+	return tab
+end
+
+function Library:AddDiscordTab(name, icon)
+	local tab = self:AddTab(name or "Discord", icon or Library.Icons.Misc, true)
+	self.DiscordTab = tab
+
+	tab:AddSection("Community & Custom Scripts")
+	tab:AddLabel("Discord: jirxy_2")
+	tab:AddLabel("Custom scripts from +5EUR. DM for any issue or requests.")
+	tab:AddButton({
+		Name = "Copy Discord Tag (jirxy_2)",
+		Callback = function()
+			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
+			if clipFn then pcall(clipFn, "jirxy_2") end
+			self:Notify({Title = "Discord Copied", Body = "jirxy_2 copied! Custom scripts (+5EUR) or DM for issues.", Type = "Success"})
+		end,
+	})
+	tab:AddButton({
+		Name = "Custom Scripts: +5EUR (DM jirxy_2)",
+		Callback = function()
+			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
+			if clipFn then pcall(clipFn, "jirxy_2") end
+			self:Notify({Title = "Commissions", Body = "Discord 'jirxy_2' copied! Contact for custom commissions.", Type = "Info"})
+		end,
+	})
+	tab:AddButton({
+		Name = "Report Issue / Support (DM jirxy_2)",
+		Callback = function()
+			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
+			if clipFn then pcall(clipFn, "jirxy_2") end
+			self:Notify({Title = "Support", Body = "Discord 'jirxy_2' copied! DM for any issue or questions.", Type = "Info"})
+		end,
+	})
 	return tab
 end
 
