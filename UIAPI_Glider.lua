@@ -498,7 +498,13 @@ function Storage.setAutoload(name)
 end
 function Storage.getAutosave()
 	if HAS_FS then
-		local ok, n = pcall(function() local p = Storage.Folder .. "/autosave.txt"; return isfile(p) and readfile(p) or nil end)
+		local ok, n = pcall(function()
+			local p = Storage.Folder .. "/autosave.txt"
+			if isfile(p) then return readfile(p) end
+			local gp = GLOBAL_DIR .. "/autosave.txt"
+			if isfile(gp) then return readfile(gp) end
+			return nil
+		end)
 		if ok and n and n ~= "" then return n == "1" or n == "true" end
 		return nil
 	end
@@ -507,9 +513,11 @@ end
 function Storage.setAutosave(enabled)
 	if HAS_FS then
 		pcall(function()
+			local val = enabled and "1" or "0"
 			if not isfolder(Storage.Folder) then makefolder(Storage.Folder) end
-			local p = Storage.Folder .. "/autosave.txt"
-			if enabled ~= nil then writefile(p, enabled and "1" or "0") elseif isfile(p) then delfile(p) end
+			writefile(Storage.Folder .. "/autosave.txt", val)
+			if not isfolder(GLOBAL_DIR) then makefolder(GLOBAL_DIR) end
+			writefile(GLOBAL_DIR .. "/autosave.txt", val)
 		end)
 	else
 		Storage._autosave = enabled
@@ -687,6 +695,13 @@ function Library.new(opts)
 		self.AutoSave = savedAutoSave
 	else
 		self.AutoSave = opts.AutoSave == true
+	end
+
+	local autoCfg = Storage.getAutoload()
+	if autoCfg then
+		self.ActiveConfig = autoCfg
+	elseif self.AutoSave then
+		self.ActiveConfig = "default"
 	end
 
 	local hideSaved = Storage.loadHideName()
@@ -1625,12 +1640,81 @@ function Library:_buildSettingsTab(name, icon)
 			self:UpdateKeybindHUD()
 		end,
 	})
+	tab:AddSection("Discord & Services")
+	local discRow = row(tab, 54)
+	label({
+		Text = "Discord: jirxy_2", FontFace = FONTS.Heading, TextSize = 14, Role = "Text",
+		Size = UDim2.new(1, -120, 0, 18), Position = UDim2.fromOffset(PAD, 8), Parent = discRow,
+	})
+	label({
+		Text = "Custom scripts (+5EUR) - DM for any issue or requests", FontFace = FONTS.Italic, TextSize = 12, Role = "SubText",
+		Size = UDim2.new(1, -120, 0, 16), Position = UDim2.fromOffset(PAD, 28), Parent = discRow,
+	})
+	local copyBtn = textButton(discRow, "Copy Tag", "primary", 1)
+	copyBtn.AnchorPoint = Vector2.new(1, 0.5)
+	copyBtn.Position = UDim2.new(1, -PAD, 0.5, 0)
+	copyBtn.MouseButton1Click:Connect(function()
+		playSound("Click")
+		local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
+		if clipFn then pcall(clipFn, "jirxy_2") end
+		self:Notify({Title = "Discord Copied", Body = "jirxy_2 copied! Custom scripts (+5EUR) or DM for issues.", Type = "Success"})
+	end)
+
+	tab:AddButton({
+		Name = "Custom Scripts: +5EUR (DM jirxy_2)",
+		Callback = function()
+			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
+			if clipFn then pcall(clipFn, "jirxy_2") end
+			self:Notify({Title = "Commissions", Body = "Discord 'jirxy_2' copied! Contact for custom commissions.", Type = "Info"})
+		end,
+	})
+	tab:AddButton({
+		Name = "Report Issue / Support (DM jirxy_2)",
+		Callback = function()
+			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
+			if clipFn then pcall(clipFn, "jirxy_2") end
+			self:Notify({Title = "Support", Body = "Discord 'jirxy_2' copied! DM for any issue or questions.", Type = "Info"})
+		end,
+	})
+
 	local unloadRow = tab:AddButton({
 		Name = "Unload " .. self.Brand,
 		Danger = true,
 		Callback = function() self:Unload() end,
 	})
 	self._unloadLabel = unloadRow:FindFirstChild("Label")
+	return tab
+end
+
+function Library:AddDiscordTab(title)
+	local tab = self:AddTab(title or "Discord", Library.Icons.Misc)
+	tab:AddSection("Discord & Commissions")
+	tab:AddLabel("Developer Contact: jirxy_2")
+	tab:AddLabel("Custom scripts from +5EUR. DM for any issue or custom requests.")
+	tab:AddButton({
+		Name = "Copy Discord (jirxy_2)",
+		Callback = function()
+			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
+			if clipFn then pcall(clipFn, "jirxy_2") end
+			self:Notify({Title = "Discord", Body = "Copied 'jirxy_2' to clipboard!", Type = "Success"})
+		end,
+	})
+	tab:AddButton({
+		Name = "Order Custom Script (+5 EUR)",
+		Callback = function()
+			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
+			if clipFn then pcall(clipFn, "jirxy_2") end
+			self:Notify({Title = "Commissions", Body = "Copied 'jirxy_2'! DM on Discord for custom scripts (+5EUR).", Type = "Info"})
+		end,
+	})
+	tab:AddButton({
+		Name = "DM for Any Issue / Support",
+		Callback = function()
+			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
+			if clipFn then pcall(clipFn, "jirxy_2") end
+			self:Notify({Title = "Support", Body = "Copied 'jirxy_2'! DM for help or questions.", Type = "Info"})
+		end,
+	})
 	return tab
 end
 
@@ -2270,7 +2354,14 @@ function Tab:_block(height) return block(self, height) end
 local autosaveToken = 0
 local function touch()
 	local w = Library._window
-	if not (w and w.AutoSave and w.ActiveConfig) or w._applying then return end
+	if not (w and w.AutoSave) or w._applying then return end
+	if not w.ActiveConfig then
+		w.ActiveConfig = Storage.getAutoload() or "default"
+		if not Storage.getAutoload() then
+			Storage.setAutoload(w.ActiveConfig)
+		end
+		w:_refreshConfigStatus()
+	end
 	autosaveToken += 1
 	local token = autosaveToken
 	task.delay(0.8, function()
@@ -3410,6 +3501,13 @@ end
 function Library:SetAutoSave(v, animate)
 	self.AutoSave = v and true or false
 	Storage.setAutosave(self.AutoSave)
+	if self.AutoSave and not self.ActiveConfig then
+		self.ActiveConfig = Storage.getAutoload() or "default"
+		if not Storage.getAutoload() then
+			Storage.setAutoload(self.ActiveConfig)
+		end
+		Storage.save(self.ActiveConfig, self:Serialize())
+	end
 	if self._updateAutoSaveUI then
 		self._updateAutoSaveUI(self.AutoSave, animate ~= false)
 	end
@@ -3418,6 +3516,9 @@ end
 
 function Library:AutoLoad()
 	local n = Storage.getAutoload()
+	if not n and self.AutoSave then
+		n = "default"
+	end
 	if not n then return end
 	local data = Storage.load(n)
 	if not data then return end
@@ -3588,7 +3689,11 @@ function Library:AddConfigTab(name, icon)
 			local n = getName(); if not n then return end
 			Storage.save(n, self:Serialize())
 			self.ActiveConfig = n
+			if not Storage.getAutoload() then
+				Storage.setAutoload(n)
+			end
 			refreshList()
+			self:_refreshConfigStatus()
 			self:Notify({Title = "Config Saved", Body = n .. " updated successfully.", Type = "Success"})
 		end,
 		Delete = function()
@@ -3597,13 +3702,16 @@ function Library:AddConfigTab(name, icon)
 			if self.ActiveConfig == n then self.ActiveConfig = nil end
 			if Storage.getAutoload() == n then Storage.setAutoload(nil) end
 			refreshList()
+			self:_refreshConfigStatus()
 			self:Notify({Title = "Config Deleted", Body = n .. " removed.", Type = "Info"})
 		end,
 		["Set Autoload"] = function()
 			local n = getName(); if not n then return end
 			if not Storage.load(n) then self:Notify({Title = "Config", Body = "Save " .. n .. " first.", Type = "Warning"}) return end
 			Storage.setAutoload(n)
+			self.ActiveConfig = n
 			refreshList()
+			self:_refreshConfigStatus()
 			self:Notify({Title = "Autoload Set", Body = n .. " will load on inject.", Type = "Success"})
 		end,
 		["Clear Autoload"] = function()
