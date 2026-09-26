@@ -488,11 +488,31 @@ end
 function Storage.setAutoload(name)
 	if HAS_FS then
 		pcall(function()
+			if not isfolder(Storage.Folder) then makefolder(Storage.Folder) end
 			local p = Storage.Folder .. "/autoload.txt"
 			if name then writefile(p, name) elseif isfile(p) then delfile(p) end
 		end)
 	else
 		Storage._autoload = name
+	end
+end
+function Storage.getAutosave()
+	if HAS_FS then
+		local ok, n = pcall(function() local p = Storage.Folder .. "/autosave.txt"; return isfile(p) and readfile(p) or nil end)
+		if ok and n and n ~= "" then return n == "1" or n == "true" end
+		return nil
+	end
+	return Storage._autosave
+end
+function Storage.setAutosave(enabled)
+	if HAS_FS then
+		pcall(function()
+			if not isfolder(Storage.Folder) then makefolder(Storage.Folder) end
+			local p = Storage.Folder .. "/autosave.txt"
+			if enabled ~= nil then writefile(p, enabled and "1" or "0") elseif isfile(p) then delfile(p) end
+		end)
+	else
+		Storage._autosave = enabled
 	end
 end
 
@@ -659,11 +679,18 @@ function Library.new(opts)
 		end
 	end
 
-	self.AutoSave = opts.AutoSave == true
-	local hideSaved = Storage.loadHideName()
-	if hideSaved ~= nil then self.HideUsername = hideSaved else self.HideUsername = opts.HideUsername == true end
 	Library._window = self
 	Storage.init(opts.Folder)
+
+	local savedAutoSave = Storage.getAutosave()
+	if savedAutoSave ~= nil then
+		self.AutoSave = savedAutoSave
+	else
+		self.AutoSave = opts.AutoSave == true
+	end
+
+	local hideSaved = Storage.loadHideName()
+	if hideSaved ~= nil then self.HideUsername = hideSaved else self.HideUsername = opts.HideUsername == true end
 
 	-- Root ScreenGui
 	self.Gui = create("ScreenGui", {
@@ -933,6 +960,7 @@ function Library:_layoutRail()
 end
 
 function Library:_refreshConfigStatus()
+	if self._refreshAutoSaveNote then self._refreshAutoSaveNote() end
 	if not self.ConfigLabel then return end
 	local T = CURRENT_THEME
 	local active = self.ActiveConfig
@@ -3379,6 +3407,15 @@ function Library:Apply(data)
 	return count
 end
 
+function Library:SetAutoSave(v, animate)
+	self.AutoSave = v and true or false
+	Storage.setAutosave(self.AutoSave)
+	if self._updateAutoSaveUI then
+		self._updateAutoSaveUI(self.AutoSave, animate ~= false)
+	end
+	self:_refreshConfigStatus()
+end
+
 function Library:AutoLoad()
 	local n = Storage.getAutoload()
 	if not n then return end
@@ -3437,14 +3474,18 @@ function Library:AddConfigTab(name, icon)
 			and ('Changes write to "' .. (self.ActiveConfig or "the active config") .. '" automatically.')
 			or "Nothing writes until you press Save."
 	end
-	local function setAutoSave(v, animate)
-		self.AutoSave = v and true or false
-		showAutoSave(self.AutoSave, animate)
+	local function updateUI(v, animate)
+		showAutoSave(v, animate)
 		refreshNote()
-		self:_refreshConfigStatus()
 	end
-	asHit.MouseButton1Click:Connect(function() playSound("Click"); setAutoSave(not self.AutoSave, true) end)
-	setAutoSave(self.AutoSave, false)
+	self._updateAutoSaveUI = updateUI
+	self._refreshAutoSaveNote = refreshNote
+
+	asHit.MouseButton1Click:Connect(function()
+		playSound("Click")
+		self:SetAutoSave(not self.AutoSave, true)
+	end)
+	updateUI(self.AutoSave, false)
 
 	tab:AddSection("Saved")
 	local listHolder = block(tab, 0) -- sits on the "Saved" sheet; holds one row per config
