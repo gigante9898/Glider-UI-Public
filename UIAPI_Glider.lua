@@ -3687,6 +3687,14 @@ function Library:AddDiscordTab(name, icon)
 	tab:AddLabel("Discord: jirxy_2")
 	tab:AddLabel("Custom scripts from +5EUR. DM for any issue or requests.")
 	tab:AddButton({
+		Name = "Join Discord (discord.gg/dJ5yNFZYmX)",
+		Callback = function()
+			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
+			if clipFn then pcall(clipFn, "https://discord.gg/dJ5yNFZYmX") end
+			self:Notify({Title = "Discord Invite Copied", Body = "https://discord.gg/dJ5yNFZYmX copied to clipboard!", Type = "Success"})
+		end,
+	})
+	tab:AddButton({
 		Name = "Copy Discord Tag (jirxy_2)",
 		Callback = function()
 			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
