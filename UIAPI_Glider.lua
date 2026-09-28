@@ -3683,15 +3683,15 @@ function Library:AddDiscordTab(name, icon)
 	local tab = self:AddTab(name or "Discord", icon or Library.Icons.Misc, true)
 	self.DiscordTab = tab
 
-	tab:AddSection("Community & Custom Scripts")
+	tab:AddSection("Community & Support")
 	tab:AddLabel("Discord: jirxy_2")
 	tab:AddLabel("Custom scripts from +5EUR. DM for any issue or requests.")
 	tab:AddButton({
-		Name = "Join Discord (discord.gg/dJ5yNFZYmX)",
+		Name = "Discord Server",
 		Callback = function()
 			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
 			if clipFn then pcall(clipFn, "https://discord.gg/dJ5yNFZYmX") end
-			self:Notify({Title = "Discord Invite Copied", Body = "https://discord.gg/dJ5yNFZYmX copied to clipboard!", Type = "Success"})
+			self:Notify({Title = "Discord Server", Body = "Copied to clipboard!", Type = "Success"})
 		end,
 	})
 	tab:AddButton({
@@ -3699,7 +3699,7 @@ function Library:AddDiscordTab(name, icon)
 		Callback = function()
 			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
 			if clipFn then pcall(clipFn, "jirxy_2") end
-			self:Notify({Title = "Discord Copied", Body = "jirxy_2 copied! Custom scripts (+5EUR) or DM for issues.", Type = "Success"})
+			self:Notify({Title = "Discord Tag", Body = "Copied to clipboard!", Type = "Success"})
 		end,
 	})
 	tab:AddButton({
@@ -3707,15 +3707,7 @@ function Library:AddDiscordTab(name, icon)
 		Callback = function()
 			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
 			if clipFn then pcall(clipFn, "jirxy_2") end
-			self:Notify({Title = "Commissions", Body = "Discord 'jirxy_2' copied! Contact for custom commissions.", Type = "Info"})
-		end,
-	})
-	tab:AddButton({
-		Name = "Report Issue / Support (DM jirxy_2)",
-		Callback = function()
-			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
-			if clipFn then pcall(clipFn, "jirxy_2") end
-			self:Notify({Title = "Support", Body = "Discord 'jirxy_2' copied! DM for any issue or questions.", Type = "Info"})
+			self:Notify({Title = "Commissions", Body = "Copied to clipboard!", Type = "Info"})
 		end,
 	})
 	return tab
