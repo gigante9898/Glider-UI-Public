@@ -30,6 +30,15 @@ local ContentProvider = game:GetService("ContentProvider")
 local LocalPlayer = Players.LocalPlayer
 local IS_MOBILE   = UIS.TouchEnabled and not UIS.KeyboardEnabled
 
+-- Instance-creation capability probe (v0.2 hardening). Restricted threads
+-- (Studio command bar, sandboxed loaders) block Instance.new with
+-- "lacking capability Plugin". Detect once so widgets degrade gracefully.
+local CAN_CREATE_INSTANCES = (function()
+	local ok, obj = pcall(function() return Instance.new("Frame") end)
+	if ok and obj then pcall(function() obj:Destroy() end) return true end
+	return false
+end)()
+
 -- ---------------------------------------------------------------------------
 -- THEMES
 -- Flat tables of named roles. The Chrome roles paint the rail and the overlays
@@ -583,6 +592,7 @@ local Library = {
 	Fonts = FONTS,
 	Storage = Storage,
 	Connect = connect,
+	CanCreateInstances = CAN_CREATE_INSTANCES,
 	IsMobile = IS_MOBILE,
 	Sounds = SOUNDS,
 	SoundEnabled = true,
@@ -729,7 +739,7 @@ function Library.new(opts)
 	-- Main Window Frame (never a CanvasGroup: it renders the whole menu darker)
 	self.Main = make("Frame", {
 		Name = "MainWindow",
-		Size = UDim2.fromOffset(780, 550),
+		Size = UDim2.fromOffset(opts.Width or 780, opts.Height or 550),
 		Position = UDim2.fromScale(0.5, 0.5),
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		BorderSizePixel = 0,
@@ -3253,6 +3263,584 @@ function Tab:AddProgressBar(opts)
 		pctLabel.Text = math.floor(pct * 100) .. "%"
 	end
 	el:Set(el.Value)
+	return el
+end
+
+-- ---------------------------------------------------------------------------
+-- 3D MODEL GRID (experimental v0.1, branch feature/viewport-grid)
+-- Generic ViewportFrame tile grid with string-Id selection + Flag persistence.
+-- Items: { { Id = "AK_Red", Name = "Red", Model = Instance | AssetId = number | Build = fn } }
+-- Weapon grouping + FollowEquipped toggle live in the game script via SetItems.
+-- ---------------------------------------------------------------------------
+local function setupModelViewport(viewport, item)
+	if not CAN_CREATE_INSTANCES then return nil end
+	if typeof(viewport) ~= "Instance" or type(item) ~= "table" then return nil end
+	for _, c in ipairs(viewport:GetChildren()) do
+		if c:IsA("WorldModel") or c:IsA("Camera") then c:Destroy() end
+	end
+	viewport.BackgroundTransparency = 1
+	local ok, model = pcall(function()
+		if item.Build and type(item.Build) == "function" then
+			return item.Build()
+		elseif item.Model and typeof(item.Model) == "Instance" then
+			return item.Model:Clone()
+		elseif item.AssetId then
+			local objs = game:GetObjects("rbxassetid://" .. tostring(item.AssetId))
+			return objs and objs[1]
+		end
+		return nil
+	end)
+	if not ok or typeof(model) ~= "Instance" then return nil end
+	local world = create("WorldModel", { Parent = viewport })
+	if not world then return nil end
+	pcall(function()
+		model.Parent = world
+		if model:IsA("BasePart") then
+			local wrapper = create("Model", {})
+			if wrapper then
+				model.Parent = wrapper
+				model = wrapper
+				model.Parent = world
+			end
+		end
+	end)
+	if typeof(model) ~= "Instance" or not model.Parent then return nil end
+	local center, size = Vector3.new(0, 0, 0), Vector3.new(2, 2, 2)
+	pcall(function()
+		local cf, sz = model:GetBoundingBox()
+		center, size = cf.Position, sz
+	end)
+	-- GetBoundingBox never throws, even on empty models (identity CFrame,
+	-- zero size). A model with no visible parts is "No preview", not a
+	-- camera aimed at world origin while parts sit thousands of studs away.
+	local visibleParts = 0
+	pcall(function()
+		for _, d in ipairs(model:GetDescendants()) do
+			if d:IsA("BasePart") and d.Transparency < 1 then visibleParts += 1 end
+		end
+	end)
+	if visibleParts == 0 then return nil end
+	local maxDim = math.max(size.X, size.Y, size.Z, 0.5)
+	-- Recenter the clone to the origin: templates carry baked world-space
+	-- CFrames (often thousands of studs out), so the camera and the model
+	-- can never disagree about where center is.
+	pcall(function() model:PivotTo(CFrame.new()) end)
+	center = Vector3.new(0, 0, 0)
+	local dist = maxDim * 1.9
+	local cam = create("Camera", {
+		FieldOfView = 35,
+		CFrame = CFrame.new(center + Vector3.new(dist * 0.7, dist * 0.45, dist * 0.9), center),
+		Parent = viewport,
+	})
+	viewport.CurrentCamera = cam
+	return { Model = model, Camera = cam, Center = center, Dist = dist, Angle = math.atan2(dist * 0.9, dist * 0.7) }
+end
+
+function Tab:AddModelGrid(opts)
+	opts = opts or {}
+	local columns = opts.Columns or 3
+	local tileSize = opts.TileSize or 96
+	local gridH = opts.GridHeight or 264
+	local rotate = opts.Rotate ~= false
+	local el = { Type = "ModelGrid", Value = opts.Default or "" }
+	register(el, opts, self)
+	local items = opts.Items or {}
+
+	-- Header row: grid name + selected value.
+	local f = row(self, ROW_H)
+	label({
+		Text = opts.Name or "Models", TextTruncate = TRUNC,
+		Size = UDim2.new(0.55, -PAD, 0, ROW_H), Position = UDim2.fromOffset(PAD, 0), Parent = f,
+	})
+	local valueLabel = label({
+		Text = "", FontFace = FONTS.Italic, TextSize = 13, TextXAlignment = RIGHT, TextTruncate = TRUNC,
+		Size = UDim2.new(0.45, -(PAD + 8), 0, ROW_H), Position = UDim2.new(1, -(PAD + 8), 0, 0),
+		AnchorPoint = Vector2.new(1, 0), Parent = f,
+	})
+
+	-- Body block: scrolling grid of tiles.
+	local body = block(self, gridH + PAD * 2)
+	local scroll = make("ScrollingFrame", {
+		Name = "ModelGrid", Size = UDim2.new(1, -PAD * 2, 1, -PAD),
+		Position = UDim2.fromOffset(PAD, PAD * 0.5), BackgroundTransparency = 1,
+		BorderSizePixel = 0, ScrollBarThickness = 2, CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = AY, ScrollingDirection = Enum.ScrollingDirection.Y, Parent = body,
+	}, { ScrollBarImageColor3 = "Rule2" }, {
+		create("UIGridLayout", {
+			CellSize = UDim2.fromOffset(tileSize, tileSize + 22),
+			CellPadding = UDim2.fromOffset(8, 8),
+			FillDirectionMaxCells = columns,
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		}),
+		padding(2, 2),
+	})
+	local emptyLabel = label({
+		Text = "No models yet. Call SetItems() with your skins.",
+		FontFace = FONTS.Italic, TextSize = 13, Role = "SubText",
+		Size = UDim2.new(1, -PAD * 2, 0, 24), Position = UDim2.fromOffset(PAD, 4),
+		Visible = #items == 0, Parent = body,
+	})
+
+	local tiles, previews = {}, {}
+	local spinOn = true
+	local gridGen = 0 -- guards stale deferred thumbnail builds across SetItems calls
+
+	local function paintTiles()
+		local T = CURRENT_THEME
+		for id, t in pairs(tiles) do
+			local on = (id == el.Value)
+			if t.Ring then t.Ring.Color = on and T.Accent or T.Rule2 end
+			if t.Ring then t.Ring.Transparency = on and 0 or 0.55 end
+			if t.NameLabel then
+				t.NameLabel.TextColor3 = on and T.Accent or T.Text
+				t.NameLabel.FontFace = on and FONTS.Italic or FONTS.Body
+			end
+		end
+	end
+	restyle(body, paintTiles)
+
+	function el:Set(id, silent)
+		self.Value = tostring(id or "")
+		Library.Flags[self.Flag] = self.Value
+		touch()
+		local found = ""
+		for _, it in ipairs(items) do
+			if tostring(it.Id) == self.Value then found = it.Name or tostring(it.Id) break end
+		end
+		valueLabel.Text = found
+		paintTiles()
+		if not silent then self.Callback(self.Value) end
+	end
+
+	function el:Get() return self.Value end
+
+	function el:SetItems(newItems, silent)
+		items = newItems or {}
+		for _, t in pairs(tiles) do
+			if t.Button then pcall(function() t.Button:Destroy() end) end
+		end
+		table.clear(tiles)
+		table.clear(previews)
+		local cap = math.min(#items, opts.MaxTiles or 60)
+		gridGen += 1
+		local myGen = gridGen
+		for i = 1, cap do
+			local okTile, errTile = pcall(function()
+			local item = items[i]
+			if type(item) ~= "table" then error("bad item at index " .. tostring(i)) end
+			local id = tostring(item.Id or ("item" .. i))
+			local b = make("TextButton", {
+				Text = "", AutoButtonColor = false, BackgroundTransparency = 1,
+				BorderSizePixel = 0, LayoutOrder = i, Parent = scroll,
+			}, { BackgroundColor3 = "Hover" }, { corner(6) })
+			if not b then error("tile button blocked") end
+			local vp = create("ViewportFrame", {
+				Name = "Preview", BackgroundTransparency = 1, BorderSizePixel = 0,
+				Size = UDim2.new(1, -8, 0, tileSize), Position = UDim2.fromOffset(4, 4),
+				Ambient = Color3.fromRGB(160, 160, 160),
+				LightColor = Color3.fromRGB(255, 255, 255),
+				LightDirection = Vector3.new(0.5, -1, 0.75),
+				Parent = b,
+			}, { corner(6) })
+			if not vp then error("viewport blocked") end
+			local ring = create("UIStroke", {
+				Thickness = 1.5, Transparency = 0.55,
+				ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b,
+			})
+			local nm = label({
+				Text = tostring(item.Name or id), TextSize = 12, TextTruncate = TRUNC,
+				TextXAlignment = CENTER, Size = UDim2.new(1, -8, 0, 16),
+				Position = UDim2.new(0, 4, 0, tileSize + 6), Parent = b,
+			})
+			local tile = { Button = b, Viewport = vp, Ring = ring, NameLabel = nm }
+			tiles[id] = tile
+			-- Build the 3D thumbnail lazily so a big grid does not hitch.
+			local idx = i
+			task.defer(function()
+				if myGen ~= gridGen then return end -- stale build from a previous SetItems
+				if not vp or not vp.Parent then return end
+				local info
+				pcall(function() info = setupModelViewport(vp, item) end)
+				if myGen ~= gridGen then return end
+				if info then
+					previews[idx] = info
+				elseif CAN_CREATE_INSTANCES then
+					pcall(function()
+						label({
+							Text = "No preview", FontFace = FONTS.Italic, TextSize = 11,
+							Role = "SubText", TextXAlignment = CENTER,
+							Size = UDim2.fromScale(1, 1), Parent = vp,
+						})
+					end)
+				end
+				-- Without Instance capability the tile keeps its name label (text mode).
+			end)
+			b.MouseEnter:Connect(function() tween(b, { BackgroundTransparency = 0.96 }) end)
+			b.MouseLeave:Connect(function() tween(b, { BackgroundTransparency = 1 }) end)
+			b.MouseButton1Click:Connect(function()
+				playSound("Click")
+				el:Set(id)
+			end)
+			end)
+			if not okTile then
+				warn("[Glider][ModelGrid] skipped tile #" .. tostring(i) .. ": " .. tostring(errTile))
+			end
+		end
+		emptyLabel.Visible = cap == 0
+		if el.Value == "" or not tiles[el.Value] then
+			local first = items[1]
+			self:Set(first and tostring(first.Id) or "", true)
+		else
+			self:Set(self.Value, true)
+		end
+	end
+
+	-- One shared orbit loop per grid; paused when the menu is hidden.
+	if rotate then
+		connect(RunService.RenderStepped, function(dt)
+			if not spinOn then return end
+			if not (body.Parent and scroll.Parent) then return end
+			local win = Library._window
+			if win and win.Main and not win.Main.Visible then return end
+			for _, info in pairs(previews) do
+				if info.Camera and info.Camera.Parent then
+					info.Angle += dt * 0.5
+					local c, d = info.Center, info.Dist
+					pcall(function()
+						info.Camera.CFrame = CFrame.new(
+							c + Vector3.new(math.cos(info.Angle) * d, d * 0.45, math.sin(info.Angle) * d), c)
+					end)
+				end
+			end
+		end)
+		connect(body:GetPropertyChangedSignal("Parent"), function()
+			if body.Parent == nil then spinOn = false end
+		end)
+	end
+
+	el:SetItems(items, true)
+	el:Set(el.Value, true)
+	return el
+end
+
+-- ---------------------------------------------------------------------------
+-- 2D IMAGE GRID (v0.8, branch feature/viewport-grid)
+-- Image tile grid for catalogs with thumbnail art (e.g. Rivals skins).
+-- Items: { { Id = "AKEY-47", Name = "AKEY-47", Image = "rbxassetid://..." } }
+-- Same Flag persistence + Callback contract as AddModelGrid, no 3D involved.
+-- ---------------------------------------------------------------------------
+function Tab:AddImageGrid(opts)
+	opts = opts or {}
+	local columns = opts.Columns or 4
+	local tileSize = opts.TileSize or 112
+	local gridH = opts.GridHeight or 300
+	local el = { Type = "ImageGrid", Value = opts.Default or "" }
+	register(el, opts, self)
+	local items = opts.Items or {}
+
+	local f = row(self, ROW_H)
+	label({
+		Text = opts.Name or "Images", TextTruncate = TRUNC,
+		Size = UDim2.new(0.55, -PAD, 0, ROW_H), Position = UDim2.fromOffset(PAD, 0), Parent = f,
+	})
+	local valueLabel = label({
+		Text = "", FontFace = FONTS.Italic, TextSize = 13, TextXAlignment = RIGHT, TextTruncate = TRUNC,
+		Size = UDim2.new(0.45, -(PAD + 8), 0, ROW_H), Position = UDim2.new(1, -(PAD + 8), 0, 0),
+		AnchorPoint = Vector2.new(1, 0), Parent = f,
+	})
+
+	local gridLayout = create("UIGridLayout", {
+		CellSize = UDim2.fromOffset(tileSize, tileSize + 18),
+		CellPadding = UDim2.fromOffset(8, 8),
+		FillDirectionMaxCells = columns,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+	})
+	local body = block(self, gridH + PAD * 2)
+	local scroll = make("ScrollingFrame", {
+		Name = "ImageGrid", Size = UDim2.new(1, -PAD * 2, 1, -PAD),
+		Position = UDim2.fromOffset(PAD, PAD * 0.5), BackgroundTransparency = 1,
+		BorderSizePixel = 0, ScrollBarThickness = 2, CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = AY, ScrollingDirection = Enum.ScrollingDirection.Y, Parent = body,
+	}, { ScrollBarImageColor3 = "Rule2" }, {
+		gridLayout,
+		padding(2, 2),
+	})
+	local emptyLabel = label({
+		Text = "No images yet. Call SetItems() with your catalog.",
+		FontFace = FONTS.Italic, TextSize = 13, Role = "SubText",
+		Size = UDim2.new(1, -PAD * 2, 0, 24), Position = UDim2.fromOffset(PAD, 4),
+		Visible = #items == 0, Parent = body,
+	})
+
+	local tiles = {}
+
+	-- Responsive tiles: cells derive from the live scroll width so the grid
+	-- expands and compresses with the window instead of fixed pixels.
+	local cell = tileSize
+	local gap, maxCols = 8, 8
+	local function fitTiles()
+		local w = scroll.AbsoluteSize.X - 8
+		if w <= 0 then return end
+		-- Adaptive columns: wider window = more columns, photos stay big.
+		local cols = math.clamp(math.floor((w + gap) / (tileSize + gap)), 2, maxCols)
+		gridLayout.FillDirectionMaxCells = cols
+		cell = math.max(math.floor((w - (cols - 1) * gap) / cols), 64)
+		gridLayout.CellSize = UDim2.fromOffset(cell, cell + 18)
+		for _, t in pairs(tiles) do
+			if t.Image then
+				t.Image.Size = UDim2.new(1, 0, 0, cell)
+				t.Image.Position = UDim2.fromOffset(0, 0)
+			end
+			if t.NameLabel then t.NameLabel.Position = UDim2.new(0, 0, 0, cell + 2) end
+		end
+	end
+	scroll:GetPropertyChangedSignal("AbsoluteSize"):Connect(fitTiles)
+	task.defer(fitTiles)
+
+	local function paintTiles()
+		local T = CURRENT_THEME
+		for id, t in pairs(tiles) do
+			local on = (id == el.Value)
+			if t.Ring then t.Ring.Color = on and T.Accent or T.Rule2 end
+			if t.Ring then t.Ring.Transparency = on and 0 or 0.55 end
+			if t.NameLabel then
+				t.NameLabel.TextColor3 = on and T.Accent or T.Text
+				t.NameLabel.FontFace = on and FONTS.Italic or FONTS.Body
+			end
+		end
+	end
+	restyle(body, paintTiles)
+
+	function el:Set(id, silent)
+		self.Value = tostring(id or "")
+		Library.Flags[self.Flag] = self.Value
+		touch()
+		local found = ""
+		for _, it in ipairs(items) do
+			if tostring(it.Id) == self.Value then found = it.Name or tostring(it.Id) break end
+		end
+		valueLabel.Text = found
+		paintTiles()
+		if not silent then self.Callback(self.Value) end
+	end
+
+	function el:Get() return self.Value end
+
+	function el:SetItems(newItems, silent)
+		items = newItems or {}
+		for _, t in pairs(tiles) do
+			if t.Button then pcall(function() t.Button:Destroy() end) end
+		end
+		table.clear(tiles)
+		local cap = math.min(#items, opts.MaxTiles or 80)
+		for i = 1, cap do
+			local okTile, errTile = pcall(function()
+				local item = items[i]
+				if type(item) ~= "table" then error("bad item at index " .. tostring(i)) end
+				local id = tostring(item.Id or ("item" .. i))
+				local b = make("TextButton", {
+					Text = "", AutoButtonColor = false, BackgroundTransparency = 1,
+					BorderSizePixel = 0, LayoutOrder = i, Parent = scroll,
+				}, { BackgroundColor3 = "Hover" }, { corner(6) })
+				if not b then error("tile button blocked") end
+				local img = create("ImageLabel", {
+					Name = "Thumb", BackgroundTransparency = 1, BorderSizePixel = 0,
+					Size = UDim2.new(1, 0, 0, cell), Position = UDim2.fromOffset(0, 0),
+					Image = tostring(item.Image or ""), ScaleType = Enum.ScaleType.Fit,
+					Parent = b,
+				}, { corner(6) })
+				if not img then error("thumbnail blocked") end
+				if img.Image == "" then
+					label({
+						Text = "No image", FontFace = FONTS.Italic, TextSize = 11,
+						Role = "SubText", TextXAlignment = CENTER,
+						Size = UDim2.fromScale(1, 1), Parent = img,
+					})
+				end
+				local ring = create("UIStroke", {
+					Thickness = 1.5, Transparency = 0.55,
+					ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b,
+				})
+				local nm = label({
+					Text = tostring(item.Name or id), TextSize = 11, TextTruncate = TRUNC,
+					TextXAlignment = CENTER, Size = UDim2.new(1, 0, 0, 14),
+					Position = UDim2.new(0, 0, 0, cell + 2), Parent = b,
+				})
+				tiles[id] = { Button = b, Image = img, Ring = ring, NameLabel = nm }
+				b.MouseEnter:Connect(function() tween(b, { BackgroundTransparency = 0.96 }) end)
+				b.MouseLeave:Connect(function() tween(b, { BackgroundTransparency = 1 }) end)
+				b.MouseButton1Click:Connect(function()
+					playSound("Click")
+					el:Set(id)
+				end)
+			end)
+			if not okTile then
+				warn("[Glider][ImageGrid] skipped tile #" .. tostring(i) .. ": " .. tostring(errTile))
+			end
+		end
+		emptyLabel.Visible = cap == 0
+		if el.Value == "" or not tiles[el.Value] then
+			local first = items[1]
+			self:Set(first and tostring(first.Id) or "", true)
+		else
+			self:Set(self.Value, true)
+		end
+	end
+
+	el:SetItems(items, true)
+	el:Set(el.Value, true)
+	return el
+end
+
+-- Horizontal icon picker: same contract as the grids (Flag/Set/Get/SetItems)
+-- but a single X-scrolling row. Used for weapon pickers (photos, not dropdowns).
+function Tab:AddIconRow(opts)
+	opts = opts or {}
+	local tileSize = opts.TileSize or 96
+	local el = { Type = "IconRow", Value = opts.Default or "" }
+	register(el, opts, self)
+	local items = opts.Items or {}
+
+	local f = row(self, ROW_H)
+	label({
+		Text = opts.Name or "Pick", TextTruncate = TRUNC,
+		Size = UDim2.new(0.55, -PAD, 0, ROW_H), Position = UDim2.fromOffset(PAD, 0), Parent = f,
+	})
+	local valueLabel = label({
+		Text = "", FontFace = FONTS.Italic, TextSize = 13, TextXAlignment = RIGHT, TextTruncate = TRUNC,
+		Size = UDim2.new(0.45, -(PAD + 8), 0, ROW_H), Position = UDim2.new(1, -(PAD + 8), 0, 0),
+		AnchorPoint = Vector2.new(1, 0), Parent = f,
+	})
+
+	local body = block(self, tileSize + 14 + PAD * 2)
+	local scroll = make("ScrollingFrame", {
+		Name = "IconRow", Size = UDim2.new(1, -PAD * 2, 1, -PAD),
+		Position = UDim2.fromOffset(PAD, PAD * 0.5), BackgroundTransparency = 1,
+		BorderSizePixel = 0, ScrollBarThickness = 2, CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = AX, ScrollingDirection = Enum.ScrollingDirection.X, Parent = body,
+	}, { ScrollBarImageColor3 = "Rule2" }, {
+		create("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			Padding = UDim.new(0, 8),
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			VerticalAlignment = Enum.VerticalAlignment.Top,
+		}),
+		padding(2, 2),
+	})
+
+	-- Mouse wheel over a horizontal row scrolls it sideways (Roblox only
+	-- scrolls the wheel along the frame's own direction by default). Tiles
+	-- cover the frame, so every tile forwards the wheel too (see SetItems).
+	local function wheelScroll(dir)
+		local maxX = math.max(scroll.CanvasSize.X.Offset - scroll.AbsoluteWindowSize.X, 0)
+		scroll.CanvasPosition = Vector2.new(math.clamp(scroll.CanvasPosition.X + dir * (tileSize + 8), 0, maxX), 0)
+	end
+	local function wheelHook(obj)
+		obj.InputChanged:Connect(function(io)
+			local okT, t = pcall(function() return io.UserInputType end)
+			local n = (okT and typeof(t) == "EnumItem") and t.Name or "?"
+			if n == "MouseWheelForward" then wheelScroll(1)
+			elseif n == "MouseWheelBackward" then wheelScroll(-1) end
+		end)
+	end
+	wheelHook(scroll)
+
+	local tiles = {}
+
+	local function paintTiles()
+		local T = CURRENT_THEME
+		for id, t in pairs(tiles) do
+			local on = (id == el.Value)
+			if t.Ring then t.Ring.Color = on and T.Accent or T.Rule2 end
+			if t.Ring then t.Ring.Transparency = on and 0 or 0.55 end
+			if t.NameLabel then
+				t.NameLabel.TextColor3 = on and T.Accent or T.Text
+				t.NameLabel.FontFace = on and FONTS.Italic or FONTS.Body
+			end
+		end
+	end
+	restyle(body, paintTiles)
+
+	function el:Set(id, silent)
+		self.Value = tostring(id or "")
+		Library.Flags[self.Flag] = self.Value
+		touch()
+		local found = ""
+		for _, it in ipairs(items) do
+			if tostring(it.Id) == self.Value then found = it.Name or tostring(it.Id) break end
+		end
+		valueLabel.Text = found
+		paintTiles()
+		if not silent then self.Callback(self.Value) end
+	end
+
+	function el:Get() return self.Value end
+
+	function el:SetItems(newItems, silent)
+		items = newItems or {}
+		for _, t in pairs(tiles) do
+			if t.Button then pcall(function() t.Button:Destroy() end) end
+		end
+		table.clear(tiles)
+		for i, item in ipairs(items) do
+			local okTile, errTile = pcall(function()
+				if type(item) ~= "table" then error("bad item at index " .. tostring(i)) end
+				local id = tostring(item.Id or ("item" .. i))
+				local b = make("TextButton", {
+					Text = "", AutoButtonColor = false, BackgroundTransparency = 1,
+					BorderSizePixel = 0, LayoutOrder = i,
+					Size = UDim2.fromOffset(tileSize, tileSize + 14),
+					Parent = scroll,
+				}, { BackgroundColor3 = "Hover" }, { corner(6) })
+				if not b then error("tile button blocked") end
+				local img = create("ImageLabel", {
+					Name = "Thumb", BackgroundTransparency = 1, BorderSizePixel = 0,
+					Size = UDim2.new(1, 0, 0, tileSize), Position = UDim2.fromOffset(0, 0),
+					Image = tostring(item.Image or ""), ScaleType = Enum.ScaleType.Fit,
+					Parent = b,
+				}, { corner(6) })
+				if not img then error("thumbnail blocked") end
+				if img.Image == "" then
+					label({
+						Text = "No image", FontFace = FONTS.Italic, TextSize = 11,
+						Role = "SubText", TextXAlignment = CENTER,
+						Size = UDim2.fromScale(1, 1), Parent = img,
+					})
+				end
+				local ring = create("UIStroke", {
+					Thickness = 1.5, Transparency = 0.55,
+					ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b,
+				})
+				local nm = label({
+					Text = tostring(item.Name or id), TextSize = 11, TextTruncate = TRUNC,
+					TextXAlignment = CENTER, Size = UDim2.new(1, 0, 0, 14),
+					Position = UDim2.new(0, 0, 0, tileSize), Parent = b,
+				})
+				tiles[id] = { Button = b, Image = img, Ring = ring, NameLabel = nm }
+				wheelHook(b)
+				b.MouseEnter:Connect(function() tween(b, { BackgroundTransparency = 0.96 }) end)
+				b.MouseLeave:Connect(function() tween(b, { BackgroundTransparency = 1 }) end)
+				b.MouseButton1Click:Connect(function()
+					playSound("Click")
+					el:Set(id)
+				end)
+			end)
+			if not okTile then
+				warn("[Glider][IconRow] skipped tile #" .. tostring(i) .. ": " .. tostring(errTile))
+			end
+		end
+		if el.Value == "" or not tiles[el.Value] then
+			local first = items[1]
+			self:Set(first and tostring(first.Id) or "", true)
+		else
+			self:Set(self.Value, true)
+		end
+	end
+
+	el:SetItems(items, true)
+	el:Set(el.Value, true)
 	return el
 end
 
