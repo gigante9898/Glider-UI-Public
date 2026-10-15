@@ -574,10 +574,21 @@ function Storage.loadHideName()
 	if v == nil then return nil end
 	return v == "1"
 end
+local function loadBit(file)
+	local v = readGlobal(file)
+	if v == nil then return nil end
+	return v == "1"
+end
+function Storage.saveSoundFX(on) writeGlobal("soundfx.txt", on and "1" or "0") end
+function Storage.loadSoundFX() return loadBit("soundfx.txt") end
+function Storage.saveWatermark(on) writeGlobal("watermark.txt", on and "1" or "0") end
+function Storage.loadWatermark() return loadBit("watermark.txt") end
+function Storage.saveKeyHUD(on) writeGlobal("keyhud.txt", on and "1" or "0") end
+function Storage.loadKeyHUD() return loadBit("keyhud.txt") end
 
 -- Settings flags that are global preferences, not part of any config: configs never
 -- save, load or reset them, and Unload leaves them alone.
-local GLOBAL_FLAGS = {MenuKey = true, HideUsername = true}
+local GLOBAL_FLAGS = {MenuKey = true, HideUsername = true, SoundFX = true, ShowWatermark = true, ShowKeybindHUD = true}
 
 -- ---------------------------------------------------------------------------
 -- LIBRARY CORE
@@ -726,6 +737,17 @@ function Library.new(opts)
 
 	local hideSaved = Storage.loadHideName()
 	if hideSaved ~= nil then self.HideUsername = hideSaved else self.HideUsername = opts.HideUsername == true end
+	-- Global settings: always persist, independent of configs/autosave.
+	self.SoundFXOn = true
+	local sfxSaved = Storage.loadSoundFX()
+	if sfxSaved ~= nil then self.SoundFXOn = sfxSaved end
+	SoundEnabled = self.SoundFXOn
+	self.ShowWatermark = true
+	local swmSaved = Storage.loadWatermark()
+	if swmSaved ~= nil then self.ShowWatermark = swmSaved end
+	self.ShowKeybindHUD = true
+	local hudSaved = Storage.loadKeyHUD()
+	if hudSaved ~= nil then self.ShowKeybindHUD = hudSaved end
 
 	-- Root ScreenGui
 	self.Gui = create("ScreenGui", {
@@ -968,6 +990,10 @@ function Library.new(opts)
 
 	-- Pinned Tabs (Settings, Config & Discord)
 	if opts.Settings ~= false then self:_buildSettingsTab(opts.SettingsName, opts.SettingsIcon) end
+	-- Apply persisted global settings (toggle creation is silent, so enforce here).
+	if self.WatermarkFrame then self.WatermarkFrame.Visible = self.ShowWatermark end
+	self._hudEnabled = self.ShowKeybindHUD
+	pcall(function() self:UpdateKeybindHUD() end)
 	if opts.Config ~= false then self:AddConfigTab(opts.ConfigName, opts.ConfigIcon) end
 	if opts.Discord ~= false then self:AddDiscordTab(opts.DiscordName, opts.DiscordIcon) end
 	self:_refreshConfigStatus()
@@ -1632,15 +1658,19 @@ function Library:_buildSettingsTab(name, icon)
 	tab:AddToggle({
 		Name = "Sound Effects",
 		Flag = "SoundFX",
-		Default = true,
-		Callback = function(v) SoundEnabled = v end,
+		Default = self.SoundFXOn,
+		Callback = function(v)
+			SoundEnabled = v
+			if not self.Unloaded then Storage.saveSoundFX(v) end
+		end,
 	})
 	tab:AddToggle({
 		Name = "Watermark",
 		Flag = "ShowWatermark",
-		Default = true,
+		Default = self.ShowWatermark,
 		Callback = function(v)
 			if self.WatermarkFrame then self.WatermarkFrame.Visible = v end
+			if not self.Unloaded then Storage.saveWatermark(v) end
 		end,
 	})
 	tab:AddToggle({
@@ -1655,10 +1685,11 @@ function Library:_buildSettingsTab(name, icon)
 	tab:AddToggle({
 		Name = "Keybinds HUD",
 		Flag = "ShowKeybindHUD",
-		Default = true,
+		Default = self.ShowKeybindHUD,
 		Callback = function(v)
 			self._hudEnabled = v
 			self:UpdateKeybindHUD()
+			if not self.Unloaded then Storage.saveKeyHUD(v) end
 		end,
 	})
 	local unloadRow = tab:AddButton({
