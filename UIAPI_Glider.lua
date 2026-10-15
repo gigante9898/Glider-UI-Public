@@ -4023,7 +4023,7 @@ end
 -- ---------------------------------------------------------------------------
 function Library:Serialize()
 	local binds = {}
-	for flag, b in pairs(Library.Binds) do binds[flag] = {Key = b.Key.Name, Mode = b.Mode} end
+	for flag, b in pairs(Library.Binds) do if not GLOBAL_FLAGS[flag] then binds[flag] = {Key = b.Key.Name, Mode = b.Mode} end end
 	local flags = {}
 	for flag, v in pairs(Library.Flags) do
 		if not GLOBAL_FLAGS[flag] then
@@ -4047,7 +4047,7 @@ function Library:Apply(data)
 	end
 	Library.Binds = {}
 	for flag, b in pairs(data.binds or {}) do
-		if toKeyCode(b.Key) then Library.Binds[flag] = {Key = toKeyCode(b.Key), Mode = b.Mode} end
+		if not GLOBAL_FLAGS[flag] and toKeyCode(b.Key) then Library.Binds[flag] = {Key = toKeyCode(b.Key), Mode = b.Mode} end
 	end
 	for _, el in pairs(Library.Elements) do
 		if el.RefreshBind then el:RefreshBind() end
