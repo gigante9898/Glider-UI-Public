@@ -714,7 +714,7 @@ function Library.new(opts)
 	if savedAutoSave ~= nil then
 		self.AutoSave = savedAutoSave
 	else
-		self.AutoSave = opts.AutoSave == true
+		self.AutoSave = opts.AutoSave ~= false
 	end
 
 	local autoCfg = Storage.getAutoload()
