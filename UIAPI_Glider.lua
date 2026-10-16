@@ -2214,6 +2214,15 @@ function Tab:SetBadge(text)
 end
 
 function Library:SelectTab(tab)
+	if type(tab) == "string" then
+		for _, t in ipairs(self.Tabs) do
+			if t.Name == tab then
+				tab = t
+				break
+			end
+		end
+	end
+	if type(tab) ~= "table" then return end
 	if tab.IsSubTab then -- a sub-tab lives inside its parent: open the parent, then the sub-tab
 		self:SelectTab(tab.ParentTab)
 		tab.ParentTab:SelectSubTab(tab)
