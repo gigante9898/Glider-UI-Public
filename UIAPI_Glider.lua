@@ -5079,7 +5079,7 @@ function Library:CreateSidePanel(title, opts)
 			Parent = content,
 		})
 		local gridLayout = create("UIGridLayout", {
-			CellSize = UDim2.fromOffset(88, 102),
+			CellSize = UDim2.fromOffset(92, 110),
 			CellPadding = UDim2.fromOffset(gap, gap),
 			FillDirectionMaxCells = cols,
 			SortOrder = Enum.SortOrder.LayoutOrder,
@@ -5088,14 +5088,17 @@ function Library:CreateSidePanel(title, opts)
 		})
 
 		local function fit()
-			local w = scroll.AbsoluteSize.X - 4
-			if w > 0 then
-				local cellW = math.floor((w - (cols - 1) * gap) / cols)
-				gridLayout.CellSize = UDim2.fromOffset(cellW, cellW + 18)
+			local w = scroll.AbsoluteSize.X
+			if w and w > 20 then
+				local cellW = math.floor((w - (cols - 1) * gap - 2) / cols)
+				if cellW > 30 then
+					gridLayout.CellSize = UDim2.fromOffset(cellW, cellW + 18)
+				end
 			end
 		end
 		scroll:GetPropertyChangedSignal("AbsoluteSize"):Connect(fit)
 		task.defer(fit)
+		task.delay(0.1, fit)
 
 		local tiles = {}
 		local currentPick = opts.Default or ""
@@ -5147,15 +5150,19 @@ function Library:CreateSidePanel(title, opts)
 				local previewInstance
 				if typeof(item.Frame) == "Instance" then
 					previewInstance = item.Frame
+					previewInstance.AnchorPoint = Vector2.new(0.5, 0.5)
+					previewInstance.Position = UDim2.fromScale(0.5, 0.5)
 					previewInstance.Size = UDim2.fromScale(1, 1)
-					previewInstance.Position = UDim2.fromScale(0, 0)
 					previewInstance.BackgroundTransparency = 1
 					previewInstance.Parent = prevContainer
 				elseif type(item.CreatePreview) == "function" then
 					local ok, res = pcall(item.CreatePreview, prevContainer)
-					if ok and typeof(res) == "Instance" and res.Parent ~= prevContainer then
-						res.Size = UDim2.fromScale(1, 1)
-						res.Parent = prevContainer
+					if ok and typeof(res) == "Instance" then
+						previewInstance = res
+						previewInstance.AnchorPoint = Vector2.new(0.5, 0.5)
+						previewInstance.Position = UDim2.fromScale(0.5, 0.5)
+						previewInstance.Size = UDim2.fromScale(1, 1)
+						if res.Parent ~= prevContainer then res.Parent = prevContainer end
 					end
 				else
 					local hasImg = (item.Image and item.Image ~= "")
@@ -5164,6 +5171,8 @@ function Library:CreateSidePanel(title, opts)
 						BackgroundColor3 = item.Color or Color3.fromRGB(35, 30, 42),
 						BackgroundTransparency = (item.Color and not hasImg) and 0 or (hasImg and 1 or 0.8),
 						BorderSizePixel = 0,
+						AnchorPoint = Vector2.new(0.5, 0.5),
+						Position = UDim2.fromScale(0.5, 0.5),
 						Size = UDim2.fromScale(1, 1),
 						Image = hasImg and item.Image or (item.Color and "" or "rbxassetid://112715941288555"),
 						ImageTransparency = 0,
