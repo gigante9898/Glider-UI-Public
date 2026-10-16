@@ -5158,7 +5158,7 @@ function Library:CreateSidePanel(title, opts)
 				local isSel = (id == currentPick)
 
 				local rarCol = item.RarityColor or (item.Rarity and RARITY_COLORS[item.Rarity])
-				local isNone = (id == "None" or id == K.NONE_ID)
+				local isNone = (id == "None" or id == "__none")
 
 				local b = make("TextButton", {
 					Name = "Tile_" .. id, Text = "", AutoButtonColor = false,
