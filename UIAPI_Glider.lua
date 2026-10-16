@@ -707,6 +707,7 @@ function Library.new(opts)
 		_tabNum = 0,
 		_pinnedCount = 0,
 		_hudEnabled = true,
+		_sidePanels = {},
 	}, Library)
 
 	if opts.MenuKey then Library.MenuKey = opts.MenuKey end
@@ -761,7 +762,7 @@ function Library.new(opts)
 	-- Main Window Frame (never a CanvasGroup: it renders the whole menu darker)
 	self.Main = make("Frame", {
 		Name = "MainWindow",
-		Size = UDim2.fromOffset(opts.Width or 780, opts.Height or 550),
+		Size = UDim2.fromOffset(opts.Width or 880, opts.Height or 560),
 		Position = UDim2.fromScale(0.5, 0.5),
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		BorderSizePixel = 0,
@@ -1822,9 +1823,21 @@ function Library:SetVisible(v)
 		tween(self.Scale, {Scale = 1}, SLIDE)
 		if self.MobileIcon then self.MobileIcon.Visible = false end
 		if self.BrandMark then self:_animateBrandMark() end
+		if self._sidePanels then
+			for _, sp in ipairs(self._sidePanels) do
+				sp.WindowVisible = true
+				if sp.IsOpen and sp.Frame then sp.Frame.Visible = true end
+			end
+		end
 	else
 		if self.Popup then self.Popup:Destroy(); self.Popup = nil end
 		self:CloseSearchModal(true)
+		if self._sidePanels then
+			for _, sp in ipairs(self._sidePanels) do
+				sp.WindowVisible = false
+				if sp.Frame then sp.Frame.Visible = false end
+			end
+		end
 		tween(self.Scale, {Scale = 0.96}, FAST).Completed:Connect(function()
 			if not self.Visible then self.Main.Visible = false; self.Scale.Scale = 1 end
 		end)
@@ -1853,6 +1866,10 @@ function Library:Unload(instant)
 		if el.Type == "Toggle" and el.Value and not GLOBAL_FLAGS[el.Flag] then pcall(el.Set, el, false) end
 	end
 	self._applying = false
+	if self._sidePanels then
+		for _, sp in ipairs(self._sidePanels) do pcall(function() sp:Destroy() end) end
+		table.clear(self._sidePanels)
+	end
 	for _, fn in ipairs(self._unloadCallbacks) do pcall(fn) end
 	for _, c in ipairs(CONNS) do pcall(function() c:Disconnect() end) end
 	table.clear(CONNS)
@@ -3566,7 +3583,12 @@ function Tab:AddImageGrid(opts)
 	local columns = opts.Columns or 4
 	local tileSize = opts.TileSize or 112
 	local gridH = opts.GridHeight or 300
-	local el = { Type = "ImageGrid", Value = opts.Default or "" }
+	local el = {
+		Type = "ImageGrid",
+		Value = opts.Default or "",
+		OnHover = opts.OnHover,
+		OnClick = opts.OnClick,
+	}
 	register(el, opts, self)
 	local items = opts.Items or {}
 
@@ -3582,7 +3604,7 @@ function Tab:AddImageGrid(opts)
 	})
 
 	local gridLayout = create("UIGridLayout", {
-		CellSize = UDim2.fromOffset(tileSize, tileSize + 18),
+		CellSize = UDim2.fromOffset(tileSize, tileSize + 22),
 		CellPadding = UDim2.fromOffset(8, 8),
 		FillDirectionMaxCells = columns,
 		SortOrder = Enum.SortOrder.LayoutOrder,
@@ -3614,17 +3636,16 @@ function Tab:AddImageGrid(opts)
 	local function fitTiles()
 		local w = scroll.AbsoluteSize.X - 8
 		if w <= 0 then return end
-		-- Adaptive columns: wider window = more columns, photos stay big.
 		local cols = math.clamp(math.floor((w + gap) / (tileSize + gap)), 2, maxCols)
 		gridLayout.FillDirectionMaxCells = cols
 		cell = math.max(math.floor((w - (cols - 1) * gap) / cols), 64)
-		gridLayout.CellSize = UDim2.fromOffset(cell, cell + 18)
+		gridLayout.CellSize = UDim2.fromOffset(cell, cell + 22)
 		for _, t in pairs(tiles) do
 			if t.Image then
-				t.Image.Size = UDim2.new(1, 0, 0, cell)
-				t.Image.Position = UDim2.fromOffset(0, 0)
+				t.Image.Size = UDim2.new(1, -8, 0, cell - 6)
+				t.Image.Position = UDim2.fromOffset(4, 4)
 			end
-			if t.NameLabel then t.NameLabel.Position = UDim2.new(0, 0, 0, cell + 2) end
+			if t.NameLabel then t.NameLabel.Position = UDim2.new(0, 0, 0, cell) end
 		end
 	end
 	scroll:GetPropertyChangedSignal("AbsoluteSize"):Connect(fitTiles)
@@ -3634,11 +3655,22 @@ function Tab:AddImageGrid(opts)
 		local T = CURRENT_THEME
 		for id, t in pairs(tiles) do
 			local on = (id == el.Value)
-			if t.Ring then t.Ring.Color = on and T.Accent or T.Rule2 end
-			if t.Ring then t.Ring.Transparency = on and 0 or 0.55 end
+			if t.Ring then
+				t.Ring.Color = on and T.Accent or T.Rule2
+				t.Ring.Transparency = on and 0 or 0.55
+				t.Ring.Thickness = on and 1.8 or 1
+			end
+			if t.Button then
+				t.Button.BackgroundColor3 = on and T.ChromeRaised or T.PageRaised
+				t.Button.BackgroundTransparency = on and 0.35 or 0.55
+			end
+			if t.SelectedBar then
+				t.SelectedBar.Visible = on
+				t.SelectedBar.BackgroundColor3 = T.Accent
+			end
 			if t.NameLabel then
 				t.NameLabel.TextColor3 = on and T.Accent or T.Text
-				t.NameLabel.FontFace = on and FONTS.Italic or FONTS.Body
+				t.NameLabel.FontFace = on and FONTS.BodySemi or FONTS.Body
 			end
 		end
 	end
@@ -3659,6 +3691,14 @@ function Tab:AddImageGrid(opts)
 
 	function el:Get() return self.Value end
 
+	function el:SetHoverCallback(fn)
+		self.OnHover = fn
+	end
+
+	function el:SetClickCallback(fn)
+		self.OnClick = fn
+	end
+
 	function el:SetItems(newItems, silent)
 		items = newItems or {}
 		for _, t in pairs(tiles) do
@@ -3672,39 +3712,56 @@ function Tab:AddImageGrid(opts)
 				if type(item) ~= "table" then error("bad item at index " .. tostring(i)) end
 				local id = tostring(item.Id or ("item" .. i))
 				local b = make("TextButton", {
-					Text = "", AutoButtonColor = false, BackgroundTransparency = 1,
+					Text = "", AutoButtonColor = false, BackgroundTransparency = 0.55,
 					BorderSizePixel = 0, LayoutOrder = i, Parent = scroll,
-				}, { BackgroundColor3 = "Hover" }, { corner(6) })
+				}, { BackgroundColor3 = "PageRaised" }, { corner(8) })
 				if not b then error("tile button blocked") end
 				local img = create("ImageLabel", {
 					Name = "Thumb", BackgroundTransparency = 1, BorderSizePixel = 0,
-					Size = UDim2.new(1, 0, 0, cell), Position = UDim2.fromOffset(0, 0),
+					Size = UDim2.new(1, -8, 0, cell - 6), Position = UDim2.fromOffset(4, 4),
 					Image = tostring(item.Image or ""), ScaleType = Enum.ScaleType.Fit,
 					Parent = b,
 				}, { corner(6) })
 				if not img then error("thumbnail blocked") end
 				if img.Image == "" then
 					label({
-						Text = "No image", FontFace = FONTS.Italic, TextSize = 11,
-						Role = "SubText", TextXAlignment = CENTER,
+						Text = "— None —", FontFace = FONTS.Italic, TextSize = 11,
+						Role = "SubText", TextXAlignment = CENTER, TextYAlignment = Enum.TextYAlignment.Center,
 						Size = UDim2.fromScale(1, 1), Parent = img,
 					})
 				end
-				local ring = create("UIStroke", {
-					Thickness = 1.5, Transparency = 0.55,
-					ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b,
-				})
+				local ring = stroke("Rule2", 1, 0.55)
+				ring.Parent = b
+
+				local selBar = make("Frame", {
+					Name = "SelectedBar", Size = UDim2.new(0.4, 0, 0, 2),
+					Position = UDim2.new(0.5, 0, 1, -2), AnchorPoint = Vector2.new(0.5, 1),
+					BorderSizePixel = 0, Visible = (id == el.Value), Parent = b,
+				}, { BackgroundColor3 = "Accent" }, { corner(1) })
+
 				local nm = label({
 					Text = tostring(item.Name or id), TextSize = 11, TextTruncate = TRUNC,
-					TextXAlignment = CENTER, Size = UDim2.new(1, 0, 0, 14),
-					Position = UDim2.new(0, 0, 0, cell + 2), Parent = b,
+					TextXAlignment = CENTER, Size = UDim2.new(1, -4, 0, 16),
+					Position = UDim2.new(0, 2, 0, cell), Parent = b,
 				})
-				tiles[id] = { Button = b, Image = img, Ring = ring, NameLabel = nm }
-				b.MouseEnter:Connect(function() tween(b, { BackgroundTransparency = 0.96 }) end)
-				b.MouseLeave:Connect(function() tween(b, { BackgroundTransparency = 1 }) end)
+				tiles[id] = { Button = b, Image = img, Ring = ring, SelectedBar = selBar, NameLabel = nm }
+
+				b.MouseEnter:Connect(function()
+					local on = (id == el.Value)
+					tween(b, { BackgroundTransparency = on and 0.25 or 0.35 })
+					if ring then tween(ring, { Transparency = on and 0 or 0.2, Color = on and CURRENT_THEME.Accent or (CURRENT_THEME.Hover or CURRENT_THEME.Accent) }) end
+					if el.OnHover then pcall(el.OnHover, id, item, true) end
+				end)
+				b.MouseLeave:Connect(function()
+					local on = (id == el.Value)
+					tween(b, { BackgroundTransparency = on and 0.35 or 0.55 })
+					if ring then tween(ring, { Transparency = on and 0 or 0.55, Color = on and CURRENT_THEME.Accent or CURRENT_THEME.Rule2 }) end
+					if el.OnHover then pcall(el.OnHover, id, item, false) end
+				end)
 				b.MouseButton1Click:Connect(function()
 					playSound("Click")
 					el:Set(id)
+					if el.OnClick then pcall(el.OnClick, id, item) end
 				end)
 			end)
 			if not okTile then
@@ -4331,5 +4388,357 @@ function Library:AddDiscordTab(name, icon)
 	})
 	return tab
 end
+
+-- ---------------------------------------------------------------------------
+-- SIDE PANEL & 3D VIEWPORT API
+-- Floating inspector attached to MainWindow with 3D studio viewport support.
+-- ---------------------------------------------------------------------------
+function Library:CreateSidePanel(title, opts)
+	if type(title) == "table" then opts = title; title = opts.Title end
+	opts = opts or {}
+	title = title or opts.Title or "Preview"
+	local width = opts.Width or 300
+	local gap = opts.Gap or 12
+
+	local panel = {
+		Title = title,
+		IsOpen = opts.Default == true or false,
+		WindowVisible = self.Visible ~= false,
+		_connections = {},
+	}
+
+	-- Root frame parented to ScreenGui (never clipped by MainWindow)
+	local frame = make("Frame", {
+		Name = "SidePanel",
+		Size = UDim2.fromOffset(width, self.Main.Size.Y.Offset),
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5),
+		BorderSizePixel = 0,
+		ClipsDescendants = true,
+		Visible = false,
+		Parent = self.Gui,
+	}, { BackgroundColor3 = "PageBg" }, { corner(6), stroke("Edge") })
+	panel.Frame = frame
+
+	local panelScale = create("UIScale", { Scale = 1, Parent = frame })
+	panel.Scale = panelScale
+	grain(frame, "Text")
+
+	-- Header
+	local head = make("Frame", {
+		Name = "Header", Size = UDim2.new(1, 0, 0, 42), BorderSizePixel = 0,
+		Parent = frame,
+	}, { BackgroundColor3 = "ChromeBg" }, { corner(6) })
+	make("Frame", {
+		Size = UDim2.new(1, 0, 0, 6), Position = UDim2.new(0, 0, 1, -6),
+		BorderSizePixel = 0, Parent = head,
+	}, { BackgroundColor3 = "ChromeBg" })
+	grain(head, "ChromeText")
+	make("Frame", {
+		Size = UDim2.new(1, 0, 0, 1), Position = UDim2.new(0, 0, 1, 0),
+		BorderSizePixel = 0, ZIndex = 3, Parent = head,
+	}, { BackgroundColor3 = "ChromeRule" })
+
+	local titleLbl = label({
+		Text = string.upper(title), FontFace = FONTS.Brand, TextSize = 14, Role = "ChromeText",
+		TextTruncate = TRUNC, Size = UDim2.new(1, -70, 0, 24),
+		Position = UDim2.fromOffset(14, 9), Parent = head,
+	})
+	local subLbl = label({
+		Text = opts.Subtitle or "3D LIVE", FontFace = FONTS.Mono, TextSize = 9,
+		Role = "Accent", TextTruncate = TRUNC, AutomaticSize = AX,
+		Size = UDim2.fromOffset(0, 14), Position = UDim2.new(1, -38, 0, 14),
+		AnchorPoint = Vector2.new(1, 0), Parent = head,
+	})
+	local closeBtn = make("TextButton", {
+		Text = "×", FontFace = FONTS.Title, TextSize = 18,
+		Size = UDim2.fromOffset(26, 26), Position = UDim2.new(1, -8, 0.5, 0),
+		AnchorPoint = Vector2.new(1, 0.5), AutoButtonColor = false,
+		BackgroundTransparency = 1, Parent = head,
+	}, { TextColor3 = "ChromeSub", BackgroundColor3 = "Hover" }, { corner(4) })
+	closeBtn.MouseEnter:Connect(function() tween(closeBtn, { BackgroundTransparency = 0.85 }) end)
+	closeBtn.MouseLeave:Connect(function() tween(closeBtn, { BackgroundTransparency = 1 }) end)
+	closeBtn.MouseButton1Click:Connect(function()
+		playSound("Click")
+		panel:Close()
+		if opts.OnClose then pcall(opts.OnClose) end
+	end)
+
+	-- Header drag moves the whole window + side panel together!
+	makeDraggable(self.Main, head)
+
+	-- Content scrolling container
+	local content = create("ScrollingFrame", {
+		Name = "Content", BackgroundTransparency = 1, BorderSizePixel = 0,
+		Position = UDim2.fromOffset(0, 43), Size = UDim2.new(1, 0, 1, -43),
+		ScrollBarThickness = 2, CanvasSize = UDim2.new(), AutomaticCanvasSize = AY,
+		Parent = frame,
+	}, { list(8), padding(10, 12) })
+	panel.Content = content
+
+	-- Real-time position tracking relative to self.Main
+	local function updatePos()
+		if not frame or not self.Main then return end
+		local mainPos = self.Main.Position
+		local mainSize = self.Main.Size
+		local anchorX = self.Main.AnchorPoint.X
+		local xOffset = (mainSize.X.Offset * (1 - anchorX)) + gap
+		frame.Position = UDim2.new(
+			mainPos.X.Scale, mainPos.X.Offset + xOffset,
+			mainPos.Y.Scale, mainPos.Y.Offset
+		)
+		frame.Size = UDim2.fromOffset(width, mainSize.Y.Offset)
+	end
+	table.insert(panel._connections, self.Main:GetPropertyChangedSignal("Position"):Connect(updatePos))
+	table.insert(panel._connections, self.Main:GetPropertyChangedSignal("Size"):Connect(updatePos))
+	updatePos()
+
+	-- Methods
+	function panel:SetTitle(t)
+		titleLbl.Text = string.upper(tostring(t or ""))
+	end
+	function panel:SetSubtitle(t, role)
+		subLbl.Text = tostring(t or "")
+		if role then paint(subLbl, { TextColor3 = role }) end
+	end
+
+	function panel:Open()
+		self.IsOpen = true
+		updatePos()
+		if self.WindowVisible ~= false then
+			frame.Visible = true
+			panelScale.Scale = 0.96
+			tween(panelScale, { Scale = 1 }, SLIDE)
+		end
+	end
+
+	function panel:Close()
+		self.IsOpen = false
+		tween(panelScale, { Scale = 0.96 }, FAST).Completed:Connect(function()
+			if not self.IsOpen then frame.Visible = false end
+		end)
+	end
+
+	function panel:Toggle(v)
+		if v == nil then v = not self.IsOpen end
+		if v then self:Open() else self:Close() end
+	end
+
+	function panel:Clear()
+		for _, c in ipairs(content:GetChildren()) do
+			if not c:IsA("UIListLayout") and not c:IsA("UIPadding") then
+				pcall(function() c:Destroy() end)
+			end
+		end
+	end
+
+	-- 3D Viewport Builder
+	function panel:AddViewport(vpOpts)
+		vpOpts = vpOpts or {}
+		local vpH = vpOpts.Height or 240
+		local card = make("Frame", {
+			Name = "ViewportCard", Size = UDim2.new(1, 0, 0, vpH),
+			BackgroundTransparency = 0.45, BorderSizePixel = 0, LayoutOrder = 1,
+			Parent = content,
+		}, { BackgroundColor3 = "PageRaised" }, { corner(8), stroke("Rule2", 1, 0.4) })
+
+		local vpFrame = Instance.new("ViewportFrame")
+		vpFrame.Name = "ModelViewport"
+		vpFrame.Size = UDim2.fromScale(1, 1)
+		vpFrame.BackgroundTransparency = 1
+		vpFrame.Ambient = Color3.fromRGB(150, 145, 155)
+		vpFrame.LightColor = Color3.fromRGB(255, 255, 255)
+		vpFrame.LightDirection = Vector3.new(-1, -1.2, -1.5).Unit
+		vpFrame.Parent = card
+
+		local worldModel = Instance.new("WorldModel")
+		worldModel.Parent = vpFrame
+
+		local camera = Instance.new("Camera")
+		camera.FieldOfView = vpOpts.FieldOfView or 48
+		camera.Parent = vpFrame
+		vpFrame.CurrentCamera = camera
+
+		local vp = {
+			Card = card,
+			Viewport = vpFrame,
+			WorldModel = worldModel,
+			Camera = camera,
+			CurrentModel = nil,
+			IsRotating = false,
+			RotateSpeed = vpOpts.RotateSpeed or 0.85,
+			Yaw = math.rad(25),
+			Pitch = math.rad(-12),
+			Distance = 4,
+			_conn = nil,
+		}
+
+		function vp:UpdateCamera()
+			local camRot = CFrame.Angles(0, self.Yaw, 0) * CFrame.Angles(self.Pitch, 0, 0)
+			local camPos = camRot:PointToWorldSpace(Vector3.new(0, 0, self.Distance))
+			camera.CFrame = CFrame.lookAt(camPos, Vector3.zero)
+		end
+
+		function vp:SetModel(inst)
+			self:Clear()
+			if not inst then return nil end
+			local ok, clone = pcall(function() return inst:Clone() end)
+			if not ok or not clone then return nil end
+
+			if not clone:IsA("Model") then
+				local m = Instance.new("Model")
+				m.Name = clone.Name
+				clone.Parent = m
+				clone = m
+			end
+
+			-- Sterilize physics
+			for _, d in ipairs(clone:GetDescendants()) do
+				if d:IsA("BasePart") then
+					d.Anchored = true
+					d.CanCollide = false
+					d.CanTouch = false
+					d.CanQuery = false
+					d.CastShadow = false
+				elseif d:IsA("BillboardGui") or d:IsA("SurfaceGui") then
+					d.Enabled = false
+				end
+			end
+			if clone:IsA("BasePart") then
+				clone.Anchored = true
+				clone.CanCollide = false
+			end
+
+			-- Center model bounding box at Vector3.zero
+			local cf, size = clone:GetBoundingBox()
+			local center = cf.Position
+			clone:PivotTo(CFrame.new(-center) * clone:GetPivot())
+
+			-- Auto-frame
+			local maxDim = math.max(size.X, size.Y, size.Z, 0.8)
+			local fovRad = math.rad(camera.FieldOfView)
+			self.Distance = math.max((maxDim * 0.5) / math.tan(fovRad * 0.5) * 1.45, 1.8)
+
+			clone.Parent = worldModel
+			self.CurrentModel = clone
+			self:UpdateCamera()
+			return clone
+		end
+
+		function vp:Clear()
+			if self.CurrentModel then
+				pcall(function() self.CurrentModel:Destroy() end)
+				self.CurrentModel = nil
+			end
+		end
+
+		function vp:SetRotating(bool, speed)
+			self.IsRotating = bool
+			if speed then self.RotateSpeed = speed end
+		end
+
+		function vp:ResetRotation()
+			self.Yaw = math.rad(25)
+			self:UpdateCamera()
+		end
+
+		vp._conn = RunService.RenderStepped:Connect(function(dt)
+			if vp.IsRotating and vp.CurrentModel and vp.CurrentModel.Parent then
+				vp.Yaw = (vp.Yaw + dt * vp.RotateSpeed) % (math.pi * 2)
+				vp:UpdateCamera()
+			end
+		end)
+
+		function vp:Destroy()
+			if self._conn then self._conn:Disconnect(); self._conn = nil end
+			self:Clear()
+			card:Destroy()
+		end
+
+		vp:UpdateCamera()
+		return vp
+	end
+
+	-- Details Card Builder
+	function panel:AddInfoCard()
+		local card = make("Frame", {
+			Name = "InfoCard", Size = UDim2.new(1, 0, 0, 84),
+			BackgroundTransparency = 0.5, BorderSizePixel = 0, LayoutOrder = 2,
+			Parent = content,
+		}, { BackgroundColor3 = "PageRaised" }, { corner(8), stroke("Rule2", 1, 0.4) })
+
+		local wName = label({
+			Text = "Weapon", FontFace = FONTS.Title, TextSize = 14, Role = "Text",
+			TextTruncate = TRUNC, Size = UDim2.new(1, -20, 0, 18),
+			Position = UDim2.fromOffset(12, 10), Parent = card,
+		})
+		local sName = label({
+			Text = "Skin: None", FontFace = FONTS.BodySemi, TextSize = 12, Role = "Accent",
+			TextTruncate = TRUNC, Size = UDim2.new(1, -20, 0, 16),
+			Position = UDim2.fromOffset(12, 32), Parent = card,
+		})
+		local wrName = label({
+			Text = "Wrap: None", FontFace = FONTS.Italic, TextSize = 11, Role = "SubText",
+			TextTruncate = TRUNC, Size = UDim2.new(1, -20, 0, 16),
+			Position = UDim2.fromOffset(12, 52), Parent = card,
+		})
+
+		local info = { Card = card }
+		function info:Set(data)
+			if data.Weapon then wName.Text = tostring(data.Weapon) end
+			if data.Skin then sName.Text = "Skin: " .. tostring(data.Skin) end
+			if data.Wrap then wrName.Text = "Wrap: " .. tostring(data.Wrap) end
+		end
+		return info
+	end
+
+	-- Simple Side Button
+	function panel:AddButton(btnOpts)
+		btnOpts = btnOpts or {}
+		local b = make("TextButton", {
+			Name = "SideButton", Size = UDim2.new(1, 0, 0, 32),
+			AutoButtonColor = false, BackgroundTransparency = 0.5,
+			Text = btnOpts.Name or "Button", FontFace = FONTS.BodySemi, TextSize = 12,
+			Parent = content,
+		}, { BackgroundColor3 = "PageRaised", TextColor3 = "Text" }, { corner(6), stroke("Rule2", 1, 0.4) })
+		b.MouseEnter:Connect(function() tween(b, { BackgroundTransparency = 0.25 }) end)
+		b.MouseLeave:Connect(function() tween(b, { BackgroundTransparency = 0.5 }) end)
+		b.MouseButton1Click:Connect(function()
+			playSound("Click")
+			if btnOpts.Callback then btnOpts.Callback() end
+		end)
+		return b
+	end
+
+	-- Simple Side Section
+	function panel:AddSection(text)
+		local sec = make("Frame", {
+			Name = "SideSection", Size = UDim2.new(1, 0, 0, 24),
+			BackgroundTransparency = 1, Parent = content,
+		})
+		label({
+			Text = string.upper(tostring(text or "")), FontFace = FONTS.Mono, TextSize = 10,
+			Role = "ChromeSub", TextTruncate = TRUNC,
+			Size = UDim2.new(1, 0, 1, 0), Position = UDim2.fromOffset(4, 0),
+			Parent = sec,
+		})
+		return sec
+	end
+
+	function panel:Destroy()
+		for _, c in ipairs(self._connections) do pcall(function() c:Disconnect() end) end
+		table.clear(self._connections)
+		if frame then frame:Destroy() end
+	end
+
+	-- Register with window for theme changes and visibility syncing
+	self._sidePanels = self._sidePanels or {}
+	table.insert(self._sidePanels, panel)
+
+	if opts.Default then panel:Open() end
+	return panel
+end
+
+Library.AddSidePanel = Library.CreateSidePanel
 
 return Library
