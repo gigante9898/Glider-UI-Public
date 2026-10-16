@@ -2230,6 +2230,13 @@ function Library:SelectTab(tab)
 	task.defer(function()
 		if self.CurrentTab == tab and not self.Unloaded then self:_syncMarker(false) end
 	end)
+	if self._sidePanels then
+		for _, sp in ipairs(self._sidePanels) do
+			if sp.BoundTab and tab.Name ~= sp.BoundTab and sp.IsOpen then
+				sp:Close()
+			end
+		end
+	end
 	if prev and prev ~= tab then
 		self.Veil.BackgroundTransparency = 0
 		tween(self.Veil, {BackgroundTransparency = 1}, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
@@ -3720,12 +3727,13 @@ function Tab:AddImageGrid(opts)
 
 	local function paintTiles()
 		local T = CURRENT_THEME
+		local NEUTRAL_SEL = Color3.fromRGB(90, 85, 95)
 		for id, t in pairs(tiles) do
 			local on = (id == el.Value)
 			if t.Ring then
-				t.Ring.Color = on and T.Accent or T.Rule2
-				t.Ring.Transparency = on and 0 or 0.6
-				t.Ring.Thickness = on and 1.6 or 1
+				t.Ring.Color = on and NEUTRAL_SEL or T.Rule2
+				t.Ring.Transparency = on and 0.1 or 0.6
+				t.Ring.Thickness = on and 1.5 or 1
 			end
 			if t.Button then
 				t.Button.BackgroundColor3 = on and T.ChromeRaised or T.PageRaised
@@ -3733,13 +3741,13 @@ function Tab:AddImageGrid(opts)
 			end
 			if t.SelectedBar then
 				t.SelectedBar.Visible = on
-				t.SelectedBar.BackgroundColor3 = T.Accent
+				t.SelectedBar.BackgroundColor3 = NEUTRAL_SEL
 			end
 			if t.EquippedBadge then
 				t.EquippedBadge.Visible = on
 			end
 			if t.NameLabel then
-				t.NameLabel.TextColor3 = on and T.Accent or T.Text
+				t.NameLabel.TextColor3 = on and T.Text or T.Text
 				t.NameLabel.FontFace = on and FONTS.BodySemi or FONTS.Body
 			end
 		end
@@ -4662,6 +4670,10 @@ function Library:CreateSidePanel(title, opts)
 	updatePos()
 
 	-- Methods
+	local shiftX = math.floor((width + gap) / 2)
+	panel.BoundTab = opts and opts.Tab
+	panel.Library = self
+
 	function panel:SetTitle(t)
 		titleLbl.Text = string.upper(tostring(t or ""))
 	end
@@ -4671,7 +4683,17 @@ function Library:CreateSidePanel(title, opts)
 	end
 
 	function panel:Open()
+		if panel.BoundTab and self.CurrentTab and self.CurrentTab.Name ~= panel.BoundTab then
+			return
+		end
 		self.IsOpen = true
+		if self.Main and not panel._isShifted then
+			panel._isShifted = true
+			panel._origMainPos = self.Main.Position
+			local orig = panel._origMainPos
+			local target = UDim2.new(orig.X.Scale, orig.X.Offset - shiftX, orig.Y.Scale, orig.Y.Offset)
+			tween(self.Main, { Position = target }, SLIDE)
+		end
 		updatePos()
 		if self.WindowVisible ~= false then
 			frame.Visible = true
@@ -4682,6 +4704,12 @@ function Library:CreateSidePanel(title, opts)
 
 	function panel:Close()
 		self.IsOpen = false
+		if panel._isShifted and self.Main and panel._origMainPos then
+			panel._isShifted = false
+			local orig = panel._origMainPos
+			panel._origMainPos = nil
+			tween(self.Main, { Position = orig }, SLIDE)
+		end
 		tween(panelScale, { Scale = 0.96 }, FAST).Completed:Connect(function()
 			if not self.IsOpen then frame.Visible = false end
 		end)
@@ -4720,7 +4748,7 @@ function Library:CreateSidePanel(title, opts)
 		vpFrame.Name = "ModelViewport"
 		vpFrame.Size = UDim2.fromScale(1, 1)
 		vpFrame.BackgroundTransparency = 1
-		vpFrame.Ambient = Color3.fromRGB(150, 145, 155)
+		vpFrame.Ambient = Color3.fromRGB(220, 215, 225)
 		vpFrame.LightColor = Color3.fromRGB(255, 255, 255)
 		vpFrame.LightDirection = Vector3.new(-1, -1.2, -1.5).Unit
 		vpFrame.Parent = card
@@ -4729,6 +4757,7 @@ function Library:CreateSidePanel(title, opts)
 		worldModel.Parent = vpFrame
 
 		local camera = Instance.new("Camera")
+		camera.CameraType = Enum.CameraType.Scriptable
 		camera.FieldOfView = vpOpts.FieldOfView or 48
 		camera.Parent = vpFrame
 		vpFrame.CurrentCamera = camera
@@ -4742,8 +4771,8 @@ function Library:CreateSidePanel(title, opts)
 			CurrentModel = nil,
 			IsRotating = false,
 			RotateSpeed = vpOpts.RotateSpeed or 0.85,
-			Yaw = math.rad(25),
-			Pitch = math.rad(-12),
+			Yaw = math.rad(35),
+			Pitch = math.rad(-14),
 			Distance = 4,
 			_conn = nil,
 		}
@@ -4767,14 +4796,19 @@ function Library:CreateSidePanel(title, opts)
 				clone = m
 			end
 
-			-- Sterilize physics
+			-- Sterilize physics and strip invisible/utility parts (e.g. Primary, Gauge, helper joints)
+			-- so they do not artificially distort the visual bounding box
 			for _, d in ipairs(clone:GetDescendants()) do
 				if d:IsA("BasePart") then
-					d.Anchored = true
-					d.CanCollide = false
-					d.CanTouch = false
-					d.CanQuery = false
-					d.CastShadow = false
+					if d.Transparency >= 0.99 or d.Name == "Primary" or d.Name == "Gauge" then
+						pcall(function() d:Destroy() end)
+					else
+						d.Anchored = true
+						d.CanCollide = false
+						d.CanTouch = false
+						d.CanQuery = false
+						d.CastShadow = false
+					end
 				elseif d:IsA("BillboardGui") or d:IsA("SurfaceGui") then
 					d.Enabled = false
 				end
@@ -4892,6 +4926,7 @@ function Library:CreateSidePanel(title, opts)
 			Parent = content,
 		}, { list(6, Enum.FillDirection.Horizontal, { VerticalAlignment = Enum.VerticalAlignment.Center }) })
 
+		local NEUTRAL_SEL = Color3.fromRGB(90, 85, 95)
 		local pills = { Value = defaultPick or (pillList[1] or ""), Buttons = {} }
 		for _, name in ipairs(pillList) do
 			local isSel = (name == pills.Value)
@@ -4904,9 +4939,11 @@ function Library:CreateSidePanel(title, opts)
 				TextColor3 = isSel and "Text" or "SubText",
 			}, {
 				corner(4),
-				stroke(isSel and "Accent" or "Rule2", 1, isSel and 0 or 0.6),
+				stroke("Rule2", 1, isSel and 0.15 or 0.65),
 				padding(10, 0),
 			})
+			local str = b:FindFirstChildOfClass("UIStroke")
+			if str and isSel then str.Color = NEUTRAL_SEL end
 			pills.Buttons[name] = b
 
 			b.MouseButton1Click:Connect(function()
@@ -4924,8 +4961,8 @@ function Library:CreateSidePanel(title, opts)
 				b.TextColor3 = active and T.Text or T.SubText
 				local str = b:FindFirstChildOfClass("UIStroke")
 				if str then
-					str.Color = active and T.Accent or T.Rule2
-					str.Transparency = active and 0 or 0.6
+					str.Color = active and NEUTRAL_SEL or T.Rule2
+					str.Transparency = active and 0.15 or 0.65
 				end
 			end
 			if not silent and callback then callback(name) end
@@ -4952,7 +4989,9 @@ function Library:CreateSidePanel(title, opts)
 				AutoButtonColor = false, BackgroundTransparency = 1,
 				AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -2, 0, 0),
 				Size = UDim2.fromOffset(40, 20), Parent = row,
-			}, { TextColor3 = "Accent" })
+			}, { TextColor3 = "SubText" })
+			actionBtn.MouseEnter:Connect(function() tween(actionBtn, { TextColor3 = CURRENT_THEME.Text }) end)
+			actionBtn.MouseLeave:Connect(function() tween(actionBtn, { TextColor3 = CURRENT_THEME.SubText }) end)
 			actionBtn.MouseButton1Click:Connect(function()
 				playSound("Click")
 				if actionCallback then actionCallback() end
@@ -5008,6 +5047,7 @@ function Library:CreateSidePanel(title, opts)
 		local cols = opts.Columns or 3
 		local gap = opts.Gap or 6
 		local gridHeight = opts.Height or 240
+		local NEUTRAL_SEL = Color3.fromRGB(90, 85, 95)
 
 		local scroll = create("ScrollingFrame", {
 			Name = "WrapGrid", Size = UDim2.new(1, 0, 0, gridHeight),
@@ -5057,31 +5097,29 @@ function Library:CreateSidePanel(title, opts)
 
 				local b = make("TextButton", {
 					Name = "Tile_" .. id, Text = "", AutoButtonColor = false,
-					BackgroundTransparency = 0.5, BorderSizePixel = 0,
+					BackgroundTransparency = isSel and 0.25 or 0.5, BorderSizePixel = 0,
 					LayoutOrder = i, Parent = scroll,
 				}, { BackgroundColor3 = "PageRaised" }, { corner(6) })
 
-				local ring = stroke(isSel and "Accent" or "Rule2", 1, isSel and 0 or 0.6)
+				local ring = stroke("Rule2", 1, isSel and 0.15 or 0.65)
+				if isSel then ring.Color = NEUTRAL_SEL end
 				ring.Parent = b
 
+				local imgUrl = (item.Image and item.Image ~= "") and item.Image or "rbxassetid://112715941288555"
 				local preview = create("ImageLabel", {
-					Name = "Preview", BackgroundTransparency = 1, BorderSizePixel = 0,
+					Name = "Preview",
+					BackgroundColor3 = item.Color or Color3.fromRGB(35, 30, 42),
+					BackgroundTransparency = item.Color and 0.35 or 0.8,
+					BorderSizePixel = 0,
 					Size = UDim2.new(1, -6, 1, -22), Position = UDim2.fromOffset(3, 3),
-					Image = tostring(item.Image or item.Texture or ""),
-					ScaleType = Enum.ScaleType.Crop, Parent = b,
+					Image = imgUrl,
+					ImageTransparency = item.Color and 0.25 or 0,
+					ScaleType = Enum.ScaleType.Fit, Parent = b,
 				}, { corner(4) })
-
-				if preview.Image == "" then
-					label({
-						Text = "Wrap", FontFace = FONTS.Italic, TextSize = 10,
-						Role = "SubText", TextXAlignment = CENTER, TextYAlignment = Enum.TextYAlignment.Center,
-						Size = UDim2.fromScale(1, 1), Parent = preview,
-					})
-				end
 
 				local nm = label({
 					Text = name, FontFace = FONTS.Body, TextSize = 10,
-					Role = isSel and "Accent" or "Text", TextTruncate = TRUNC,
+					Role = isSel and "Text" or "SubText", TextTruncate = TRUNC,
 					TextXAlignment = CENTER, Size = UDim2.new(1, -4, 0, 16),
 					Position = UDim2.new(0, 2, 1, -16), Parent = b,
 				})
@@ -5090,12 +5128,14 @@ function Library:CreateSidePanel(title, opts)
 
 				b.MouseEnter:Connect(function()
 					local active = (id == currentPick)
-					if ring then ring.Transparency = active and 0 or 0.2 end
+					tween(b, { BackgroundTransparency = active and 0.2 or 0.35 })
+					if ring and not active then tween(ring, { Transparency = 0.35, Color = NEUTRAL_SEL }) end
 					if gridObj.OnHover then gridObj.OnHover(id, item, true) end
 				end)
 				b.MouseLeave:Connect(function()
 					local active = (id == currentPick)
-					if ring then ring.Transparency = active and 0 or 0.6 end
+					tween(b, { BackgroundTransparency = active and 0.25 or 0.5 })
+					if ring and not active then tween(ring, { Transparency = 0.65, Color = CURRENT_THEME.Rule2 }) end
 					if gridObj.OnHover then gridObj.OnHover(id, item, false) end
 				end)
 				b.MouseButton1Click:Connect(function()
@@ -5112,11 +5152,14 @@ function Library:CreateSidePanel(title, opts)
 			for tId, t in pairs(tiles) do
 				local active = (tId == currentPick)
 				if t.Ring then
-					t.Ring.Color = active and T.Accent or T.Rule2
-					t.Ring.Transparency = active and 0 or 0.6
+					t.Ring.Color = active and NEUTRAL_SEL or T.Rule2
+					t.Ring.Transparency = active and 0.15 or 0.65
+				end
+				if t.Button then
+					t.Button.BackgroundTransparency = active and 0.25 or 0.5
 				end
 				if t.Label then
-					t.Label.TextColor3 = active and T.Accent or T.Text
+					t.Label.TextColor3 = active and T.Text or T.SubText
 					t.Label.FontFace = active and FONTS.BodySemi or FONTS.Body
 				end
 			end
