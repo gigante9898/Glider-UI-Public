@@ -147,6 +147,15 @@ local SLIDE = TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.O
 -- CONNECTION TRACKER & HELPERS
 -- ---------------------------------------------------------------------------
 local CONNS = {}
+local RARITY_COLORS = {
+	Common    = Color3.fromRGB(80, 200, 80),
+	Uncommon  = Color3.fromRGB(100, 220, 100),
+	Rare      = Color3.fromRGB(0, 210, 255),
+	Epic      = Color3.fromRGB(170, 60, 240),
+	Legendary = Color3.fromRGB(255, 60, 40),
+	Mythical  = Color3.fromRGB(240, 70, 255),
+	Default   = Color3.fromRGB(140, 140, 145),
+}
 local function connect(signal, fn)
 	local c = signal:Connect(fn)
 	table.insert(CONNS, c)
@@ -3588,32 +3597,46 @@ function Tab:AddImageGrid(opts)
 		Value = opts.Default or "",
 		OnHover = opts.OnHover,
 		OnClick = opts.OnClick,
+		OnCustomize = opts.OnCustomize,
 	}
 	register(el, opts, self)
 	local items = opts.Items or {}
 
-	local f = row(self, ROW_H)
-	label({
-		Text = opts.Name or "Images", TextTruncate = TRUNC,
-		Size = UDim2.new(0.55, -PAD, 0, ROW_H), Position = UDim2.fromOffset(PAD, 0), Parent = f,
-	})
-	local valueLabel = label({
-		Text = "", FontFace = FONTS.Italic, TextSize = 13, TextXAlignment = RIGHT, TextTruncate = TRUNC,
-		Size = UDim2.new(0.45, -(PAD + 8), 0, ROW_H), Position = UDim2.new(1, -(PAD + 8), 0, 0),
-		AnchorPoint = Vector2.new(1, 0), Parent = f,
-	})
+	local f, valueLabel
+	if not opts.HideHeader then
+		f = row(self, ROW_H)
+		label({
+			Text = opts.Name or "Images", TextTruncate = TRUNC,
+			Size = UDim2.new(0.55, -PAD, 0, ROW_H), Position = UDim2.fromOffset(PAD, 0), Parent = f,
+		})
+		valueLabel = label({
+			Text = "", FontFace = FONTS.Italic, TextSize = 13, TextXAlignment = RIGHT, TextTruncate = TRUNC,
+			Size = UDim2.new(0.45, -(PAD + 8), 0, ROW_H), Position = UDim2.new(1, -(PAD + 8), 0, 0),
+			AnchorPoint = Vector2.new(1, 0), Parent = f,
+		})
+	end
 
 	local gridLayout = create("UIGridLayout", {
-		CellSize = UDim2.fromOffset(tileSize, tileSize + 22),
+		CellSize = UDim2.fromOffset(tileSize, tileSize + 28),
 		CellPadding = UDim2.fromOffset(8, 8),
 		FillDirectionMaxCells = columns,
 		SortOrder = Enum.SortOrder.LayoutOrder,
 		HorizontalAlignment = Enum.HorizontalAlignment.Center,
 	})
-	local body = block(self, gridH + PAD * 2)
+
+	local body
+	if opts.Flat then
+		body = create("Frame", {
+			Name = "ImageGridFrame", Size = UDim2.new(1, 0, 0, gridH),
+			BackgroundTransparency = 1, BorderSizePixel = 0, Parent = self.Page,
+		})
+	else
+		body = block(self, gridH + PAD * 2)
+	end
+
 	local scroll = make("ScrollingFrame", {
-		Name = "ImageGrid", Size = UDim2.new(1, -PAD * 2, 1, -PAD),
-		Position = UDim2.fromOffset(PAD, PAD * 0.5), BackgroundTransparency = 1,
+		Name = "ImageGrid", Size = UDim2.new(1, opts.Flat and 0 or -PAD * 2, 1, opts.Flat and 0 or -PAD),
+		Position = opts.Flat and UDim2.new() or UDim2.fromOffset(PAD, PAD * 0.5), BackgroundTransparency = 1,
 		BorderSizePixel = 0, ScrollBarThickness = 2, CanvasSize = UDim2.new(),
 		AutomaticCanvasSize = AY, ScrollingDirection = Enum.ScrollingDirection.Y, Parent = body,
 	}, { ScrollBarImageColor3 = "Rule2" }, {
@@ -3628,24 +3651,24 @@ function Tab:AddImageGrid(opts)
 	})
 
 	local tiles = {}
-
-	-- Responsive tiles: cells derive from the live scroll width so the grid
-	-- expands and compresses with the window instead of fixed pixels.
 	local cell = tileSize
 	local gap, maxCols = 8, 8
+
 	local function fitTiles()
 		local w = scroll.AbsoluteSize.X - 8
 		if w <= 0 then return end
-		local cols = math.clamp(math.floor((w + gap) / (tileSize + gap)), 2, maxCols)
+		local cols = opts.Columns or math.clamp(math.floor((w + gap) / (tileSize + gap)), 2, maxCols)
 		gridLayout.FillDirectionMaxCells = cols
 		cell = math.max(math.floor((w - (cols - 1) * gap) / cols), 64)
-		gridLayout.CellSize = UDim2.fromOffset(cell, cell + 22)
+		local extraH = (opts.CardStyle == "Rivals" or opts.ShowRarity) and 34 or 24
+		gridLayout.CellSize = UDim2.fromOffset(cell, cell + extraH)
 		for _, t in pairs(tiles) do
 			if t.Image then
-				t.Image.Size = UDim2.new(1, -8, 0, cell - 6)
+				t.Image.Size = UDim2.new(1, -8, 0, cell - 8)
 				t.Image.Position = UDim2.fromOffset(4, 4)
 			end
-			if t.NameLabel then t.NameLabel.Position = UDim2.new(0, 0, 0, cell) end
+			if t.NameLabel then t.NameLabel.Position = UDim2.new(0, 4, 0, cell - 2) end
+			if t.RarityLabel then t.RarityLabel.Position = UDim2.new(0, 4, 0, cell + 12) end
 		end
 	end
 	scroll:GetPropertyChangedSignal("AbsoluteSize"):Connect(fitTiles)
@@ -3662,11 +3685,17 @@ function Tab:AddImageGrid(opts)
 			end
 			if t.Button then
 				t.Button.BackgroundColor3 = on and T.ChromeRaised or T.PageRaised
-				t.Button.BackgroundTransparency = on and 0.35 or 0.55
+				t.Button.BackgroundTransparency = on and 0.25 or 0.55
 			end
 			if t.SelectedBar then
 				t.SelectedBar.Visible = on
 				t.SelectedBar.BackgroundColor3 = T.Accent
+			end
+			if t.EquippedBadge then
+				t.EquippedBadge.Visible = on
+			end
+			if t.CustomizeBtn then
+				t.CustomizeBtn.Visible = on
 			end
 			if t.NameLabel then
 				t.NameLabel.TextColor3 = on and T.Accent or T.Text
@@ -3684,20 +3713,16 @@ function Tab:AddImageGrid(opts)
 		for _, it in ipairs(items) do
 			if tostring(it.Id) == self.Value then found = it.Name or tostring(it.Id) break end
 		end
-		valueLabel.Text = found
+		if valueLabel then valueLabel.Text = found end
 		paintTiles()
-		if not silent then self.Callback(self.Value) end
+		if not silent and self.Callback then self.Callback(self.Value) end
 	end
 
 	function el:Get() return self.Value end
 
-	function el:SetHoverCallback(fn)
-		self.OnHover = fn
-	end
-
-	function el:SetClickCallback(fn)
-		self.OnClick = fn
-	end
+	function el:SetHoverCallback(fn) self.OnHover = fn end
+	function el:SetClickCallback(fn) self.OnClick = fn end
+	function el:SetCustomizeCallback(fn) self.OnCustomize = fn end
 
 	function el:SetItems(newItems, silent)
 		items = newItems or {}
@@ -3711,18 +3736,23 @@ function Tab:AddImageGrid(opts)
 				local item = items[i]
 				if type(item) ~= "table" then error("bad item at index " .. tostring(i)) end
 				local id = tostring(item.Id or ("item" .. i))
+				local rarityText = item.Rarity or "Default"
+				local rarityCol = item.RarityColor or RARITY_COLORS[rarityText] or RARITY_COLORS.Default
+				local isEquipped = (id == el.Value) or (item.Equipped == true)
+
 				local b = make("TextButton", {
 					Text = "", AutoButtonColor = false, BackgroundTransparency = 0.55,
 					BorderSizePixel = 0, LayoutOrder = i, Parent = scroll,
-				}, { BackgroundColor3 = "PageRaised" }, { corner(8) })
+				}, { BackgroundColor3 = "PageRaised" }, { corner(6) })
 				if not b then error("tile button blocked") end
+
 				local img = create("ImageLabel", {
 					Name = "Thumb", BackgroundTransparency = 1, BorderSizePixel = 0,
-					Size = UDim2.new(1, -8, 0, cell - 6), Position = UDim2.fromOffset(4, 4),
+					Size = UDim2.new(1, -8, 0, cell - 8), Position = UDim2.fromOffset(4, 4),
 					Image = tostring(item.Image or ""), ScaleType = Enum.ScaleType.Fit,
 					Parent = b,
-				}, { corner(6) })
-				if not img then error("thumbnail blocked") end
+				}, { corner(4) })
+
 				if img.Image == "" then
 					label({
 						Text = "— None —", FontFace = FONTS.Italic, TextSize = 11,
@@ -3733,29 +3763,70 @@ function Tab:AddImageGrid(opts)
 				local ring = stroke("Rule2", 1, 0.55)
 				ring.Parent = b
 
-				local selBar = make("Frame", {
-					Name = "SelectedBar", Size = UDim2.new(0.4, 0, 0, 2),
-					Position = UDim2.new(0.5, 0, 1, -2), AnchorPoint = Vector2.new(0.5, 1),
-					BorderSizePixel = 0, Visible = (id == el.Value), Parent = b,
-				}, { BackgroundColor3 = "Accent" }, { corner(1) })
-
-				local nm = label({
-					Text = tostring(item.Name or id), TextSize = 11, TextTruncate = TRUNC,
-					TextXAlignment = CENTER, Size = UDim2.new(1, -4, 0, 16),
-					Position = UDim2.new(0, 2, 0, cell), Parent = b,
+				-- Top-right Equipped badge
+				local eqBadge = make("Frame", {
+					Name = "EquippedBadge", Size = UDim2.fromOffset(44, 13),
+					Position = UDim2.new(1, -3, 0, 3), AnchorPoint = Vector2.new(1, 0),
+					BorderSizePixel = 0, Visible = isEquipped, ZIndex = 3, Parent = b,
+				}, { BackgroundColor3 = "Accent" }, { corner(3) })
+				label({
+					Text = "Equipped", FontFace = FONTS.Mono, TextSize = 8,
+					Role = "ChromeText", TextXAlignment = CENTER, TextYAlignment = Enum.TextYAlignment.Center,
+					Size = UDim2.fromScale(1, 1), Parent = eqBadge,
 				})
-				tiles[id] = { Button = b, Image = img, Ring = ring, SelectedBar = selBar, NameLabel = nm }
+
+				-- Bottom 2px rarity underline
+				local rarityBar = create("Frame", {
+					Name = "RarityBar", Size = UDim2.new(1, 0, 0, 2),
+					Position = UDim2.new(0, 0, 1, -2), BorderSizePixel = 0, ZIndex = 2,
+					BackgroundColor3 = rarityCol, Parent = b,
+				})
+
+				-- Labels
+				local nm = label({
+					Text = tostring(item.Name or id), FontFace = FONTS.BodySemi, TextSize = 10,
+					TextTruncate = TRUNC, TextXAlignment = Enum.TextXAlignment.Left,
+					Size = UDim2.new(1, -8, 0, 13), Position = UDim2.new(0, 4, 0, cell - 2), Parent = b,
+				})
+				local rLbl = create("TextLabel", {
+					Name = "RarityLabel", Text = rarityText, FontFace = FONTS.Body, TextSize = 9,
+					TextColor3 = rarityCol, BackgroundTransparency = 1, TextTruncate = TRUNC,
+					TextXAlignment = Enum.TextXAlignment.Left, Size = UDim2.new(1, -8, 0, 12),
+					Position = UDim2.new(0, 4, 0, cell + 12), Parent = b,
+				})
+
+				-- In-card Customize button
+				local custBtn = make("TextButton", {
+					Name = "CustomizeBtn", Text = "Customize", FontFace = FONTS.BodySemi, TextSize = 10,
+					AutoButtonColor = false, BackgroundTransparency = 0.25, BorderSizePixel = 0,
+					Size = UDim2.new(1, -12, 0, 18), Position = UDim2.new(0.5, 0, 0.45, 0),
+					AnchorPoint = Vector2.new(0.5, 0.5), Visible = isEquipped, ZIndex = 4, Parent = b,
+				}, { BackgroundColor3 = "PageBg", TextColor3 = "Text" }, { corner(4), stroke("Accent", 1) })
+
+				custBtn.MouseButton1Click:Connect(function()
+					playSound("Click")
+					if opts.OnCustomize then pcall(opts.OnCustomize, id, item) end
+					if el.OnCustomize then pcall(el.OnCustomize, id, item) end
+				end)
+
+				tiles[id] = {
+					Button = b, Image = img, Ring = ring, NameLabel = nm,
+					RarityLabel = rLbl, RarityBar = rarityBar,
+					EquippedBadge = eqBadge, CustomizeBtn = custBtn,
+				}
 
 				b.MouseEnter:Connect(function()
 					local on = (id == el.Value)
-					tween(b, { BackgroundTransparency = on and 0.25 or 0.35 })
-					if ring then tween(ring, { Transparency = on and 0 or 0.2, Color = on and CURRENT_THEME.Accent or (CURRENT_THEME.Hover or CURRENT_THEME.Accent) }) end
+					tween(b, { BackgroundTransparency = on and 0.2 or 0.35 })
+					if ring then tween(ring, { Transparency = on and 0 or 0.2, Color = on and CURRENT_THEME.Accent or CURRENT_THEME.Accent }) end
+					custBtn.Visible = true
 					if el.OnHover then pcall(el.OnHover, id, item, true) end
 				end)
 				b.MouseLeave:Connect(function()
 					local on = (id == el.Value)
-					tween(b, { BackgroundTransparency = on and 0.35 or 0.55 })
+					tween(b, { BackgroundTransparency = on and 0.25 or 0.55 })
 					if ring then tween(ring, { Transparency = on and 0 or 0.55, Color = on and CURRENT_THEME.Accent or CURRENT_THEME.Rule2 }) end
+					custBtn.Visible = on
 					if el.OnHover then pcall(el.OnHover, id, item, false) end
 				end)
 				b.MouseButton1Click:Connect(function()
@@ -3779,6 +3850,75 @@ function Tab:AddImageGrid(opts)
 
 	el:SetItems(items, true)
 	el:Set(el.Value, true)
+	return el
+end
+
+-- Horizontal Pills Selector (Category tabs / sub-filters)
+function Tab:AddPills(opts)
+	opts = opts or {}
+	local items = opts.Items or {}
+	local el = {
+		Type = "Pills",
+		Value = opts.Default or (items[1] or ""),
+		Buttons = {},
+	}
+	register(el, opts, self)
+
+	local rowFrame = create("Frame", {
+		Name = "PillsRow",
+		Size = UDim2.new(1, 0, 0, 32),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Parent = self.Page,
+	}, {
+		list(8, Enum.FillDirection.Horizontal, {
+			VerticalAlignment = Enum.VerticalAlignment.Center,
+		}),
+		padding(opts.Flat and 2 or PAD, 0),
+	})
+
+	for _, name in ipairs(items) do
+		local isSel = (name == el.Value)
+		local b = make("TextButton", {
+			Name = "Pill_" .. name, Text = name, FontFace = FONTS.BodySemi, TextSize = 12,
+			AutoButtonColor = false, AutomaticSize = AX, Size = UDim2.new(0, 0, 1, -4),
+			Parent = rowFrame,
+		}, {
+			BackgroundColor3 = isSel and "PageRaised" or "ChromeBg",
+			TextColor3 = isSel and "Text" or "SubText",
+		}, {
+			corner(4),
+			stroke(isSel and "Accent" or "Rule2", 1, isSel and 0 or 0.6),
+			padding(12, 0),
+		})
+		el.Buttons[name] = b
+
+		b.MouseButton1Click:Connect(function()
+			playSound("Click")
+			el:Set(name)
+		end)
+	end
+
+	function el:Set(name, silent)
+		self.Value = name
+		Library.Flags[self.Flag] = self.Value
+		touch()
+		local T = CURRENT_THEME
+		for pName, b in pairs(self.Buttons) do
+			local active = (pName == name)
+			b.BackgroundColor3 = active and T.PageRaised or T.ChromeBg
+			b.TextColor3 = active and T.Text or T.SubText
+			local str = b:FindFirstChildOfClass("UIStroke")
+			if str then
+				str.Color = active and T.Accent or T.Rule2
+				str.Transparency = active and 0 or 0.6
+			end
+		end
+		if not silent and self.Callback then self.Callback(name) end
+	end
+
+	function el:Get() return self.Value end
+
 	return el
 end
 
@@ -4542,6 +4682,12 @@ function Library:CreateSidePanel(title, opts)
 			Parent = content,
 		}, { BackgroundColor3 = "PageRaised" }, { corner(8), stroke("Rule2", 1, 0.4) })
 
+		local bottomBar = make("Frame", {
+			Name = "BottomAccent", Size = UDim2.new(1, 0, 0, 2),
+			Position = UDim2.new(0, 0, 1, -2), BorderSizePixel = 0, ZIndex = 3,
+			Parent = card,
+		}, { BackgroundColor3 = "Accent" })
+
 		local vpFrame = Instance.new("ViewportFrame")
 		vpFrame.Name = "ModelViewport"
 		vpFrame.Size = UDim2.fromScale(1, 1)
@@ -4564,6 +4710,7 @@ function Library:CreateSidePanel(title, opts)
 			Viewport = vpFrame,
 			WorldModel = worldModel,
 			Camera = camera,
+			BottomAccent = bottomBar,
 			CurrentModel = nil,
 			IsRotating = false,
 			RotateSpeed = vpOpts.RotateSpeed or 0.85,
@@ -4659,37 +4806,300 @@ function Library:CreateSidePanel(title, opts)
 		return vp
 	end
 
-	-- Details Card Builder
-	function panel:AddInfoCard()
-		local card = make("Frame", {
-			Name = "InfoCard", Size = UDim2.new(1, 0, 0, 84),
-			BackgroundTransparency = 0.5, BorderSizePixel = 0, LayoutOrder = 2,
+	-- Flat Header Info (Minimalist: zero card nesting!)
+	function panel:AddHeaderInfo(opts)
+		opts = opts or {}
+		local container = create("Frame", {
+			Name = "HeaderInfo", Size = UDim2.new(1, 0, 0, 56),
+			BackgroundTransparency = 1, BorderSizePixel = 0, LayoutOrder = opts.LayoutOrder or 2,
 			Parent = content,
-		}, { BackgroundColor3 = "PageRaised" }, { corner(8), stroke("Rule2", 1, 0.4) })
-
-		local wName = label({
-			Text = "Weapon", FontFace = FONTS.Title, TextSize = 14, Role = "Text",
-			TextTruncate = TRUNC, Size = UDim2.new(1, -20, 0, 18),
-			Position = UDim2.fromOffset(12, 10), Parent = card,
-		})
-		local sName = label({
-			Text = "Skin: None", FontFace = FONTS.BodySemi, TextSize = 12, Role = "Accent",
-			TextTruncate = TRUNC, Size = UDim2.new(1, -20, 0, 16),
-			Position = UDim2.fromOffset(12, 32), Parent = card,
-		})
-		local wrName = label({
-			Text = "Wrap: None", FontFace = FONTS.Italic, TextSize = 11, Role = "SubText",
-			TextTruncate = TRUNC, Size = UDim2.new(1, -20, 0, 16),
-			Position = UDim2.fromOffset(12, 52), Parent = card,
 		})
 
-		local info = { Card = card }
+		local tagLbl = label({
+			Text = tostring(opts.Tag or opts.Weapon or ""), FontFace = FONTS.Body, TextSize = 10,
+			Role = "ChromeSub", TextTruncate = TRUNC, Size = UDim2.new(1, 0, 0, 13),
+			Position = UDim2.fromOffset(2, 2), Parent = container,
+		})
+		local titleLbl = label({
+			Text = tostring(opts.Title or opts.Skin or ""), FontFace = FONTS.Heading, TextSize = 16,
+			Role = "Text", TextTruncate = TRUNC, Size = UDim2.new(1, 0, 0, 20),
+			Position = UDim2.fromOffset(2, 16), Parent = container,
+		})
+		local rarityLbl = label({
+			Text = tostring(opts.Subtitle or opts.Rarity or ""), FontFace = FONTS.BodySemi, TextSize = 12,
+			Role = "Accent", TextTruncate = TRUNC, Size = UDim2.new(1, 0, 0, 16),
+			Position = UDim2.fromOffset(2, 37), Parent = container,
+		})
+
+		local info = { Container = container, TagLabel = tagLbl, TitleLabel = titleLbl, RarityLabel = rarityLbl }
 		function info:Set(data)
-			if data.Weapon then wName.Text = tostring(data.Weapon) end
-			if data.Skin then sName.Text = "Skin: " .. tostring(data.Skin) end
-			if data.Wrap then wrName.Text = "Wrap: " .. tostring(data.Wrap) end
+			data = data or {}
+			if data.Tag or data.Weapon then tagLbl.Text = tostring(data.Tag or data.Weapon) end
+			if data.Title or data.Skin then titleLbl.Text = tostring(data.Title or data.Skin) end
+			local sub = data.Subtitle or data.Rarity or data.Wrap
+			if sub then rarityLbl.Text = tostring(sub) end
+			if data.Color then
+				rarityLbl.TextColor3 = data.Color
+			elseif data.Rarity and RARITY_COLORS[data.Rarity] then
+				rarityLbl.TextColor3 = RARITY_COLORS[data.Rarity]
+			elseif data.Role then
+				paint(rarityLbl, { TextColor3 = data.Role })
+			end
 		end
+		if opts.Color then rarityLbl.TextColor3 = opts.Color end
 		return info
+	end
+
+	-- AddInfoCard alias for backward compatibility (maps to flat AddHeaderInfo)
+	function panel:AddInfoCard(opts)
+		return self:AddHeaderInfo(opts)
+	end
+
+	-- Sub-Tabs / Pills Row (e.g. [ Wrap ] [ Charm ] [ Kill effect ])
+	function panel:AddPills(pillList, defaultPick, callback)
+		pillList = pillList or {}
+		local container = create("Frame", {
+			Name = "PillsRow", Size = UDim2.new(1, 0, 0, 30),
+			BackgroundTransparency = 1, BorderSizePixel = 0, LayoutOrder = 3,
+			Parent = content,
+		}, { list(6, Enum.FillDirection.Horizontal, { VerticalAlignment = Enum.VerticalAlignment.Center }) })
+
+		local pills = { Value = defaultPick or (pillList[1] or ""), Buttons = {} }
+		for _, name in ipairs(pillList) do
+			local isSel = (name == pills.Value)
+			local b = make("TextButton", {
+				Name = "Pill_" .. name, Text = name, FontFace = FONTS.BodySemi, TextSize = 11,
+				AutoButtonColor = false, AutomaticSize = AX, Size = UDim2.new(0, 0, 1, -4),
+				Parent = container,
+			}, {
+				BackgroundColor3 = isSel and "PageRaised" or "ChromeBg",
+				TextColor3 = isSel and "Text" or "SubText",
+			}, {
+				corner(4),
+				stroke(isSel and "Accent" or "Rule2", 1, isSel and 0 or 0.6),
+				padding(10, 0),
+			})
+			pills.Buttons[name] = b
+
+			b.MouseButton1Click:Connect(function()
+				playSound("Click")
+				pills:Set(name)
+			end)
+		end
+
+		function pills:Set(name, silent)
+			self.Value = name
+			local T = CURRENT_THEME
+			for pName, b in pairs(self.Buttons) do
+				local active = (pName == name)
+				b.BackgroundColor3 = active and T.PageRaised or T.ChromeBg
+				b.TextColor3 = active and T.Text or T.SubText
+				local str = b:FindFirstChildOfClass("UIStroke")
+				if str then
+					str.Color = active and T.Accent or T.Rule2
+					str.Transparency = active and 0 or 0.6
+				end
+			end
+			if not silent and callback then callback(name) end
+		end
+		return pills
+	end
+
+	-- Flat Section Sub-Header (e.g. Left: "Wrap", Right: "None")
+	function panel:AddSectionHeader(text, actionText, actionCallback)
+		local row = create("Frame", {
+			Name = "SectionHeader", Size = UDim2.new(1, 0, 0, 22),
+			BackgroundTransparency = 1, BorderSizePixel = 0, LayoutOrder = 4,
+			Parent = content,
+		})
+		local tLbl = label({
+			Text = tostring(text or "Wrap"), FontFace = FONTS.BodySemi, TextSize = 13,
+			Role = "Text", Size = UDim2.new(0.6, 0, 1, 0), Position = UDim2.fromOffset(2, 0),
+			Parent = row,
+		})
+		local actionBtn
+		if actionText then
+			actionBtn = make("TextButton", {
+				Text = tostring(actionText), FontFace = FONTS.BodySemi, TextSize = 11,
+				AutoButtonColor = false, BackgroundTransparency = 1,
+				AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -2, 0, 0),
+				Size = UDim2.fromOffset(40, 20), Parent = row,
+			}, { TextColor3 = "Accent" })
+			actionBtn.MouseButton1Click:Connect(function()
+				playSound("Click")
+				if actionCallback then actionCallback() end
+			end)
+		end
+		return {
+			Row = row, TitleLabel = tLbl, ActionButton = actionBtn,
+			SetAction = function(txt, cb)
+				if actionBtn and txt then actionBtn.Text = tostring(txt) end
+				if cb then actionCallback = cb end
+			end,
+		}
+	end
+
+	-- Minimalist Search Input
+	function panel:AddSearch(placeholder, callback)
+		local box = make("Frame", {
+			Name = "SearchBox", Size = UDim2.new(1, 0, 0, 28),
+			BackgroundTransparency = 0.5, BorderSizePixel = 0, LayoutOrder = 5,
+			Parent = content,
+		}, { BackgroundColor3 = "PageRaised" }, { corner(4), stroke("Rule2", 1, 0.4) })
+
+		make("ImageLabel", {
+			Image = asset(Library.Icons.Search), BackgroundTransparency = 1,
+			Size = UDim2.fromOffset(13, 13), Position = UDim2.new(0, 8, 0.5, 0),
+			AnchorPoint = Vector2.new(0, 0.5), Parent = box,
+		}, { ImageColor3 = "SubText" })
+
+		local tb = create("TextBox", {
+			Text = "", PlaceholderText = placeholder or "Search wrap...",
+			FontFace = FONTS.Body, TextSize = 11, ClearTextOnFocus = false,
+			BackgroundTransparency = 1, BorderSizePixel = 0,
+			Size = UDim2.new(1, -32, 1, 0), Position = UDim2.fromOffset(26, 0),
+			Parent = box,
+		})
+		paint(tb, { TextColor3 = "Text", PlaceholderColor3 = "SubText" })
+
+		tb:GetPropertyChangedSignal("Text"):Connect(function()
+			if callback then callback(tb.Text) end
+		end)
+
+		return {
+			Box = box,
+			TextBox = tb,
+			Get = function() return tb.Text end,
+			Set = function(t) tb.Text = t or "" end,
+		}
+	end
+
+	-- 3-Column Flat Wrap Grid (Textures / Materials)
+	function panel:AddWrapGrid(opts)
+		opts = opts or {}
+		local cols = opts.Columns or 3
+		local gap = opts.Gap or 6
+		local gridHeight = opts.Height or 240
+
+		local scroll = create("ScrollingFrame", {
+			Name = "WrapGrid", Size = UDim2.new(1, 0, 0, gridHeight),
+			BackgroundTransparency = 1, BorderSizePixel = 0, LayoutOrder = 6,
+			ScrollBarThickness = 2, CanvasSize = UDim2.new(), AutomaticCanvasSize = AY,
+			Parent = content,
+		})
+		local gridLayout = create("UIGridLayout", {
+			CellSize = UDim2.fromOffset(88, 102),
+			CellPadding = UDim2.fromOffset(gap, gap),
+			FillDirectionMaxCells = cols,
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			HorizontalAlignment = Enum.HorizontalAlignment.Center,
+			Parent = scroll,
+		})
+
+		local function fit()
+			local w = scroll.AbsoluteSize.X - 4
+			if w > 0 then
+				local cellW = math.floor((w - (cols - 1) * gap) / cols)
+				gridLayout.CellSize = UDim2.fromOffset(cellW, cellW + 18)
+			end
+		end
+		scroll:GetPropertyChangedSignal("AbsoluteSize"):Connect(fit)
+		task.defer(fit)
+
+		local tiles = {}
+		local currentPick = opts.Default or ""
+
+		local gridObj = {
+			Scroll = scroll,
+			Value = currentPick,
+			OnHover = opts.OnHover,
+			OnClick = opts.OnClick,
+			Callback = opts.Callback,
+		}
+
+		function gridObj:SetItems(items)
+			items = items or {}
+			for _, t in pairs(tiles) do if t.Button then pcall(function() t.Button:Destroy() end) end end
+			table.clear(tiles)
+
+			for i, item in ipairs(items) do
+				local id = tostring(item.Id or item.Name or ("wrap" .. i))
+				local name = tostring(item.Name or id)
+				local isSel = (id == currentPick)
+
+				local b = make("TextButton", {
+					Name = "Tile_" .. id, Text = "", AutoButtonColor = false,
+					BackgroundTransparency = 0.5, BorderSizePixel = 0,
+					LayoutOrder = i, Parent = scroll,
+				}, { BackgroundColor3 = "PageRaised" }, { corner(6) })
+
+				local ring = stroke(isSel and "Accent" or "Rule2", 1, isSel and 0 or 0.6)
+				ring.Parent = b
+
+				local preview = create("ImageLabel", {
+					Name = "Preview", BackgroundTransparency = 1, BorderSizePixel = 0,
+					Size = UDim2.new(1, -6, 1, -22), Position = UDim2.fromOffset(3, 3),
+					Image = tostring(item.Image or item.Texture or ""),
+					ScaleType = Enum.ScaleType.Crop, Parent = b,
+				}, { corner(4) })
+
+				if preview.Image == "" then
+					label({
+						Text = "Wrap", FontFace = FONTS.Italic, TextSize = 10,
+						Role = "SubText", TextXAlignment = CENTER, TextYAlignment = Enum.TextYAlignment.Center,
+						Size = UDim2.fromScale(1, 1), Parent = preview,
+					})
+				end
+
+				local nm = label({
+					Text = name, FontFace = FONTS.Body, TextSize = 10,
+					Role = isSel and "Accent" or "Text", TextTruncate = TRUNC,
+					TextXAlignment = CENTER, Size = UDim2.new(1, -4, 0, 16),
+					Position = UDim2.new(0, 2, 1, -16), Parent = b,
+				})
+
+				tiles[id] = { Button = b, Preview = preview, Ring = ring, Label = nm, Item = item }
+
+				b.MouseEnter:Connect(function()
+					local active = (id == currentPick)
+					if ring then ring.Transparency = active and 0 or 0.2 end
+					if gridObj.OnHover then gridObj.OnHover(id, item, true) end
+				end)
+				b.MouseLeave:Connect(function()
+					local active = (id == currentPick)
+					if ring then ring.Transparency = active and 0 or 0.6 end
+					if gridObj.OnHover then gridObj.OnHover(id, item, false) end
+				end)
+				b.MouseButton1Click:Connect(function()
+					playSound("Click")
+					gridObj:Set(id)
+				end)
+			end
+		end
+
+		function gridObj:Set(id, silent)
+			currentPick = tostring(id or "")
+			self.Value = currentPick
+			local T = CURRENT_THEME
+			for tId, t in pairs(tiles) do
+				local active = (tId == currentPick)
+				if t.Ring then
+					t.Ring.Color = active and T.Accent or T.Rule2
+					t.Ring.Transparency = active and 0 or 0.6
+				end
+				if t.Label then
+					t.Label.TextColor3 = active and T.Accent or T.Text
+					t.Label.FontFace = active and FONTS.BodySemi or FONTS.Body
+				end
+			end
+			if not silent and self.Callback then self.Callback(currentPick) end
+			if not silent and self.OnClick then self.OnClick(currentPick) end
+		end
+
+		function gridObj:Get() return currentPick end
+
+		if opts.Items then gridObj:SetItems(opts.Items) end
+		return gridObj
 	end
 
 	-- Simple Side Button
