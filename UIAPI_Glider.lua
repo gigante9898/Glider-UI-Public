@@ -4846,7 +4846,8 @@ function Library:CreateSidePanel(title, opts)
 			-- Auto-frame
 			local maxDim = math.max(size.X, size.Y, size.Z, 0.8)
 			local fovRad = math.rad(camera.FieldOfView)
-			self.Distance = math.max((maxDim * 0.5) / math.tan(fovRad * 0.5) * 1.35, 1.8)
+			local zoom = vpOpts.ZoomMultiplier or 1.04
+			self.Distance = math.max((maxDim * 0.5) / math.tan(fovRad * 0.5) * zoom, 1.4)
 
 			clone.Parent = worldModel
 			self.CurrentModel = clone
@@ -4872,7 +4873,9 @@ function Library:CreateSidePanel(title, opts)
 		end
 
 		vp._conn = RunService.RenderStepped:Connect(function(dt)
-			if vp.IsRotating and vp.CurrentModel and vp.CurrentModel.Parent then
+			if vp.IsRotating and card.Visible and card.Parent and vp.CurrentModel and vp.CurrentModel.Parent then
+				local lib = Library._window
+				if lib and lib.Visible == false then return end
 				vp.Yaw = (vp.Yaw + dt * vp.RotateSpeed) % (math.pi * 2)
 				vp:UpdateCamera()
 			end
@@ -5111,8 +5114,12 @@ function Library:CreateSidePanel(title, opts)
 			Callback = opts.Callback,
 		}
 
+		local gridGen = 0
 		function gridObj:SetItems(items)
 			items = items or {}
+			gridGen = gridGen + 1
+			local myGen = gridGen
+
 			for _, t in pairs(tiles) do
 				if t.Item and type(t.Item.Destroy) == "function" then
 					pcall(t.Item.Destroy, t.Item)
@@ -5147,38 +5154,29 @@ function Library:CreateSidePanel(title, opts)
 					BackgroundColor3 = item.Color and "ChromeBg" or "PageBg",
 				}, { corner(4) })
 
-				local previewInstance
+				local hasImg = (item.Image and item.Image ~= "")
+				local previewInstance = create("ImageLabel", {
+					Name = "PreviewImage",
+					BackgroundColor3 = item.Color or Color3.fromRGB(35, 30, 42),
+					BackgroundTransparency = (item.Color and not hasImg) and 0 or (hasImg and 1 or 0.8),
+					BorderSizePixel = 0,
+					AnchorPoint = Vector2.new(0.5, 0.5),
+					Position = UDim2.fromScale(0.5, 0.5),
+					Size = UDim2.fromScale(1, 1),
+					Image = hasImg and item.Image or (item.Color and "" or "rbxassetid://112715941288555"),
+					ImageTransparency = 0,
+					ScaleType = Enum.ScaleType.Crop,
+					Parent = prevContainer,
+				})
+
 				if typeof(item.Frame) == "Instance" then
-					previewInstance = item.Frame
-					previewInstance.AnchorPoint = Vector2.new(0.5, 0.5)
-					previewInstance.Position = UDim2.fromScale(0.5, 0.5)
-					previewInstance.Size = UDim2.fromScale(1, 1)
-					previewInstance.BackgroundTransparency = 1
-					previewInstance.Parent = prevContainer
-				elseif type(item.CreatePreview) == "function" then
-					local ok, res = pcall(item.CreatePreview, prevContainer)
-					if ok and typeof(res) == "Instance" then
-						previewInstance = res
-						previewInstance.AnchorPoint = Vector2.new(0.5, 0.5)
-						previewInstance.Position = UDim2.fromScale(0.5, 0.5)
-						previewInstance.Size = UDim2.fromScale(1, 1)
-						if res.Parent ~= prevContainer then res.Parent = prevContainer end
-					end
-				else
-					local hasImg = (item.Image and item.Image ~= "")
-					previewInstance = create("ImageLabel", {
-						Name = "PreviewImage",
-						BackgroundColor3 = item.Color or Color3.fromRGB(35, 30, 42),
-						BackgroundTransparency = (item.Color and not hasImg) and 0 or (hasImg and 1 or 0.8),
-						BorderSizePixel = 0,
-						AnchorPoint = Vector2.new(0.5, 0.5),
-						Position = UDim2.fromScale(0.5, 0.5),
-						Size = UDim2.fromScale(1, 1),
-						Image = hasImg and item.Image or (item.Color and "" or "rbxassetid://112715941288555"),
-						ImageTransparency = 0,
-						ScaleType = Enum.ScaleType.Crop,
-						Parent = prevContainer,
-					})
+					local f = item.Frame
+					f.AnchorPoint = Vector2.new(0.5, 0.5)
+					f.Position = UDim2.fromScale(0.5, 0.5)
+					f.Size = UDim2.fromScale(1, 1)
+					f.BackgroundTransparency = 1
+					f.Parent = prevContainer
+					previewInstance.Visible = false
 				end
 
 				local nm = label({
@@ -5205,6 +5203,32 @@ function Library:CreateSidePanel(title, opts)
 				b.MouseButton1Click:Connect(function()
 					playSound("Click")
 					gridObj:Set(id)
+				end)
+			end
+
+			if #items > 0 then
+				task.spawn(function()
+					for i, item in ipairs(items) do
+						if gridGen ~= myGen then return end
+						if type(item.CreatePreview) == "function" then
+							local id = tostring(item.Id or item.Name or ("wrap" .. i))
+							local t = tiles[id]
+							if t and t.PreviewContainer and t.PreviewContainer.Parent then
+								local ok, res = pcall(item.CreatePreview, t.PreviewContainer)
+								if ok and typeof(res) == "Instance" then
+									res.AnchorPoint = Vector2.new(0.5, 0.5)
+									res.Position = UDim2.fromScale(0.5, 0.5)
+									res.Size = UDim2.fromScale(1, 1)
+									if res.Parent ~= t.PreviewContainer then res.Parent = t.PreviewContainer end
+									local img = t.PreviewContainer:FindFirstChild("PreviewImage")
+									if img then img.Visible = false end
+								end
+							end
+						end
+						if i % 6 == 0 then
+							task.wait()
+						end
+					end
 				end)
 			end
 		end
