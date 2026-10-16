@@ -2247,6 +2247,8 @@ function Library:SelectTab(tab)
 		for _, sp in ipairs(self._sidePanels) do
 			if sp.BoundTab and tab.Name ~= sp.BoundTab and sp.IsOpen then
 				sp:Close()
+			elseif sp.BoundTab and tab.Name == sp.BoundTab and not sp.IsOpen and (sp.AutoOpen ~= false) then
+				sp:Open()
 			end
 		end
 	end
