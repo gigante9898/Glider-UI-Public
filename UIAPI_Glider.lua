@@ -3738,9 +3738,9 @@ function Tab:AddImageGrid(opts)
 	scroll:GetPropertyChangedSignal("AbsoluteSize"):Connect(fitTiles)
 	task.defer(fitTiles)
 
+	local NEUTRAL_SEL = Color3.fromRGB(90, 85, 95)
 	local function paintTiles()
 		local T = CURRENT_THEME
-		local NEUTRAL_SEL = Color3.fromRGB(90, 85, 95)
 		for id, t in pairs(tiles) do
 			local on = (id == el.Value)
 			local rarCol = t.RarityColor
