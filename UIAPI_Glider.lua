@@ -3924,9 +3924,11 @@ function Tab:AddPills(opts)
 			TextColor3 = isSel and "Text" or "SubText",
 		}, {
 			corner(4),
-			stroke(isSel and "Accent" or "Rule2", 1, isSel and 0 or 0.6),
+			stroke("Rule2", 1, isSel and 0.15 or 0.6),
 			padding(12, 0),
 		})
+		local str = b:FindFirstChildOfClass("UIStroke")
+		if str and isSel then str.Color = Color3.fromRGB(90, 85, 95) end
 		el.Buttons[name] = b
 
 		b.MouseButton1Click:Connect(function()
@@ -3940,14 +3942,15 @@ function Tab:AddPills(opts)
 		Library.Flags[self.Flag] = self.Value
 		touch()
 		local T = CURRENT_THEME
+		local NEUTRAL_SEL = Color3.fromRGB(90, 85, 95)
 		for pName, b in pairs(self.Buttons) do
 			local active = (pName == name)
 			b.BackgroundColor3 = active and T.PageRaised or T.ChromeBg
 			b.TextColor3 = active and T.Text or T.SubText
 			local str = b:FindFirstChildOfClass("UIStroke")
 			if str then
-				str.Color = active and T.Accent or T.Rule2
-				str.Transparency = active and 0 or 0.6
+				str.Color = active and NEUTRAL_SEL or T.Rule2
+				str.Transparency = active and 0.15 or 0.6
 			end
 		end
 		if not silent and self.Callback then self.Callback(name) end
@@ -4015,13 +4018,14 @@ function Tab:AddIconRow(opts)
 
 	local function paintTiles()
 		local T = CURRENT_THEME
+		local NEUTRAL_SEL = Color3.fromRGB(90, 85, 95)
 		for id, t in pairs(tiles) do
 			local on = (id == el.Value)
-			if t.Ring then t.Ring.Color = on and T.Accent or T.Rule2 end
-			if t.Ring then t.Ring.Transparency = on and 0 or 0.55 end
+			if t.Ring then t.Ring.Color = on and NEUTRAL_SEL or T.Rule2 end
+			if t.Ring then t.Ring.Transparency = on and 0.15 or 0.65 end
 			if t.NameLabel then
-				t.NameLabel.TextColor3 = on and T.Accent or T.Text
-				t.NameLabel.FontFace = on and FONTS.Italic or FONTS.Body
+				t.NameLabel.TextColor3 = on and T.Text or T.SubText
+				t.NameLabel.FontFace = on and FONTS.BodySemi or FONTS.Body
 			end
 		end
 	end
@@ -4084,8 +4088,20 @@ function Tab:AddIconRow(opts)
 				})
 				tiles[id] = { Button = b, Image = img, Ring = ring, NameLabel = nm }
 				wheelHook(b)
-				b.MouseEnter:Connect(function() tween(b, { BackgroundTransparency = 0.96 }) end)
-				b.MouseLeave:Connect(function() tween(b, { BackgroundTransparency = 1 }) end)
+				b.MouseEnter:Connect(function()
+					local on = (id == el.Value)
+					tween(b, { BackgroundTransparency = on and 0.94 or 0.96 })
+					if ring and not on then
+						tween(ring, { Transparency = 0.35, Color = Color3.fromRGB(90, 85, 95) })
+					end
+				end)
+				b.MouseLeave:Connect(function()
+					local on = (id == el.Value)
+					tween(b, { BackgroundTransparency = 1 })
+					if ring and not on then
+						tween(ring, { Transparency = 0.65, Color = CURRENT_THEME.Rule2 })
+					end
+				end)
 				b.MouseButton1Click:Connect(function()
 					playSound("Click")
 					el:Set(id)
@@ -4622,7 +4638,7 @@ function Library:CreateSidePanel(title, opts)
 	})
 	local subLbl = label({
 		Text = opts.Subtitle or "3D LIVE", FontFace = FONTS.Mono, TextSize = 9,
-		Role = "Accent", TextTruncate = TRUNC, AutomaticSize = AX,
+		Role = "ChromeSub", TextTruncate = TRUNC, AutomaticSize = AX,
 		Size = UDim2.fromOffset(0, 14), Position = UDim2.new(1, -38, 0, 14),
 		AnchorPoint = Vector2.new(1, 0), Parent = head,
 	})
@@ -4683,19 +4699,20 @@ function Library:CreateSidePanel(title, opts)
 	end
 
 	function panel:Open()
-		if panel.BoundTab and self.CurrentTab and self.CurrentTab.Name ~= panel.BoundTab then
+		local lib = self.Library or Library._window
+		if panel.BoundTab and lib and lib.CurrentTab and lib.CurrentTab.Name ~= panel.BoundTab then
 			return
 		end
-		self.IsOpen = true
-		if self.Main and not panel._isShifted then
+		panel.IsOpen = true
+		if lib and lib.Main and not panel._isShifted then
 			panel._isShifted = true
-			panel._origMainPos = self.Main.Position
+			panel._origMainPos = lib.Main.Position
 			local orig = panel._origMainPos
 			local target = UDim2.new(orig.X.Scale, orig.X.Offset - shiftX, orig.Y.Scale, orig.Y.Offset)
-			tween(self.Main, { Position = target }, SLIDE)
+			tween(lib.Main, { Position = target }, SLIDE)
 		end
 		updatePos()
-		if self.WindowVisible ~= false then
+		if not lib or lib.Visible ~= false then
 			frame.Visible = true
 			panelScale.Scale = 0.96
 			tween(panelScale, { Scale = 1 }, SLIDE)
@@ -4703,15 +4720,16 @@ function Library:CreateSidePanel(title, opts)
 	end
 
 	function panel:Close()
-		self.IsOpen = false
-		if panel._isShifted and self.Main and panel._origMainPos then
+		local lib = self.Library or Library._window
+		panel.IsOpen = false
+		if panel._isShifted and lib and lib.Main and panel._origMainPos then
 			panel._isShifted = false
 			local orig = panel._origMainPos
 			panel._origMainPos = nil
-			tween(self.Main, { Position = orig }, SLIDE)
+			tween(lib.Main, { Position = orig }, SLIDE)
 		end
 		tween(panelScale, { Scale = 0.96 }, FAST).Completed:Connect(function()
-			if not self.IsOpen then frame.Visible = false end
+			if not panel.IsOpen then frame.Visible = false end
 		end)
 	end
 
@@ -4738,12 +4756,6 @@ function Library:CreateSidePanel(title, opts)
 			Parent = content,
 		}, { BackgroundColor3 = "PageRaised" }, { corner(8), stroke("Rule2", 1, 0.4) })
 
-		local bottomBar = make("Frame", {
-			Name = "BottomAccent", Size = UDim2.new(1, 0, 0, 2),
-			Position = UDim2.new(0, 0, 1, -2), BorderSizePixel = 0, ZIndex = 3,
-			Parent = card,
-		}, { BackgroundColor3 = "Accent" })
-
 		local vpFrame = Instance.new("ViewportFrame")
 		vpFrame.Name = "ModelViewport"
 		vpFrame.Size = UDim2.fromScale(1, 1)
@@ -4767,7 +4779,6 @@ function Library:CreateSidePanel(title, opts)
 			Viewport = vpFrame,
 			WorldModel = worldModel,
 			Camera = camera,
-			BottomAccent = bottomBar,
 			CurrentModel = nil,
 			IsRotating = false,
 			RotateSpeed = vpOpts.RotateSpeed or 0.85,
@@ -4800,7 +4811,7 @@ function Library:CreateSidePanel(title, opts)
 			-- so they do not artificially distort the visual bounding box
 			for _, d in ipairs(clone:GetDescendants()) do
 				if d:IsA("BasePart") then
-					if d.Transparency >= 0.99 or d.Name == "Primary" or d.Name == "Gauge" then
+					if d.Transparency >= 0.99 or d.Name == "Primary" or d.Name == "Gauge" or d.Name == "Flash" or d.Name == "Sight" then
 						pcall(function() d:Destroy() end)
 					else
 						d.Anchored = true
@@ -4826,7 +4837,7 @@ function Library:CreateSidePanel(title, opts)
 			-- Auto-frame
 			local maxDim = math.max(size.X, size.Y, size.Z, 0.8)
 			local fovRad = math.rad(camera.FieldOfView)
-			self.Distance = math.max((maxDim * 0.5) / math.tan(fovRad * 0.5) * 1.45, 1.8)
+			self.Distance = math.max((maxDim * 0.5) / math.tan(fovRad * 0.5) * 1.35, 1.8)
 
 			clone.Parent = worldModel
 			self.CurrentModel = clone
@@ -4889,7 +4900,7 @@ function Library:CreateSidePanel(title, opts)
 		})
 		local rarityLbl = label({
 			Text = tostring(opts.Subtitle or opts.Rarity or ""), FontFace = FONTS.BodySemi, TextSize = 12,
-			Role = "Accent", TextTruncate = TRUNC, Size = UDim2.new(1, 0, 0, 16),
+			Role = "SubText", TextTruncate = TRUNC, Size = UDim2.new(1, 0, 0, 16),
 			Position = UDim2.fromOffset(2, 37), Parent = container,
 		})
 
@@ -5105,16 +5116,16 @@ function Library:CreateSidePanel(title, opts)
 				if isSel then ring.Color = NEUTRAL_SEL end
 				ring.Parent = b
 
-				local imgUrl = (item.Image and item.Image ~= "") and item.Image or "rbxassetid://112715941288555"
+				local hasImg = (item.Image and item.Image ~= "")
 				local preview = create("ImageLabel", {
 					Name = "Preview",
 					BackgroundColor3 = item.Color or Color3.fromRGB(35, 30, 42),
-					BackgroundTransparency = item.Color and 0.35 or 0.8,
+					BackgroundTransparency = (item.Color and not hasImg) and 0 or (hasImg and 1 or 0.8),
 					BorderSizePixel = 0,
 					Size = UDim2.new(1, -6, 1, -22), Position = UDim2.fromOffset(3, 3),
-					Image = imgUrl,
-					ImageTransparency = item.Color and 0.25 or 0,
-					ScaleType = Enum.ScaleType.Fit, Parent = b,
+					Image = hasImg and item.Image or (item.Color and "" or "rbxassetid://112715941288555"),
+					ImageTransparency = 0,
+					ScaleType = Enum.ScaleType.Crop, Parent = b,
 				}, { corner(4) })
 
 				local nm = label({
