@@ -148,17 +148,26 @@ local SLIDE = TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.O
 -- ---------------------------------------------------------------------------
 local CONNS = {}
 local RARITY_COLORS = {
-	Common       = Color3.fromRGB(110, 220, 60), -- Rivals Green
-	Uncommon     = Color3.fromRGB(110, 220, 60),
-	Rare         = Color3.fromRGB(0, 210, 255),   -- Rivals Cyan
-	Epic         = Color3.fromRGB(110, 80, 230),  -- Rivals Purple
-	Legendary    = Color3.fromRGB(255, 45, 60),   -- Rivals Red
-	Mythical     = Color3.fromRGB(110, 80, 230),  -- Rivals Purple (Aegis, Blizzard, etc.)
-	Genuine      = Color3.fromRGB(75, 150, 65),   -- Rivals Olive
-	Unique       = Color3.fromRGB(255, 140, 0),   -- Rivals Orange
-	Unobtainable = Color3.fromRGB(140, 40, 200),  -- Rivals Dark Violet
-	Default      = Color3.fromRGB(140, 140, 145),
+	Common       = Color3.fromRGB(130, 255, 90),  -- Luminous Lime Green
+	Uncommon     = Color3.fromRGB(130, 255, 90),
+	Rare         = Color3.fromRGB(80, 220, 255),  -- Luminous Cyan
+	Epic         = Color3.fromRGB(190, 130, 255), -- Luminous Purple
+	Legendary    = Color3.fromRGB(255, 80, 80),   -- Luminous Red
+	Mythical     = Color3.fromRGB(190, 130, 255), -- Luminous Purple (Aegis, Blizzard, etc.)
+	Genuine      = Color3.fromRGB(120, 220, 130), -- Luminous Emerald
+	Unique       = Color3.fromRGB(255, 170, 50),  -- Luminous Orange
+	Unobtainable = Color3.fromRGB(220, 130, 255), -- Luminous Lavender/Amethyst (Never black!)
+	Default      = Color3.fromRGB(190, 190, 200),
 }
+local function getReadableRarityColor(c, fallback)
+	if not c then return fallback or RARITY_COLORS.Default end
+	local lum = 0.299 * c.R + 0.587 * c.G + 0.114 * c.B
+	if lum < 0.38 then
+		local h, s, v = c:ToHSV()
+		return Color3.fromHSV(h, math.clamp(s, 0.35, 0.75), math.clamp(v + 0.55, 0.85, 1))
+	end
+	return c
+end
 local function connect(signal, fn)
 	local c = signal:Connect(fn)
 	table.insert(CONNS, c)
@@ -3812,7 +3821,7 @@ function Tab:AddImageGrid(opts)
 				if type(item) ~= "table" then error("bad item at index " .. tostring(i)) end
 				local id = tostring(item.Id or ("item" .. i))
 				local rarityText = item.Rarity or "Default"
-				local rarityCol = item.RarityColor or RARITY_COLORS[rarityText] or RARITY_COLORS.Default
+				local rarityCol = getReadableRarityColor(item.RarityColor or RARITY_COLORS[rarityText] or RARITY_COLORS.Default)
 				local isNone = (id == "None" or id == "__none")
 				local isEquipped = (id == el.Value) or (item.Equipped == true)
 
@@ -4972,14 +4981,14 @@ function Library:CreateSidePanel(title, opts)
 			local sub = data.Subtitle or data.Rarity or data.Wrap
 			if sub then rarityLbl.Text = tostring(sub) end
 			if data.Color then
-				rarityLbl.TextColor3 = data.Color
+				rarityLbl.TextColor3 = getReadableRarityColor(data.Color)
 			elseif data.Rarity and RARITY_COLORS[data.Rarity] then
-				rarityLbl.TextColor3 = RARITY_COLORS[data.Rarity]
+				rarityLbl.TextColor3 = getReadableRarityColor(RARITY_COLORS[data.Rarity])
 			elseif data.Role then
 				paint(rarityLbl, { TextColor3 = data.Role })
 			end
 		end
-		if opts.Color then rarityLbl.TextColor3 = opts.Color end
+		if opts.Color then rarityLbl.TextColor3 = getReadableRarityColor(opts.Color) end
 		return info
 	end
 
@@ -5181,7 +5190,7 @@ function Library:CreateSidePanel(title, opts)
 				local name = tostring(item.Name or id)
 				local isSel = (id == currentPick)
 
-				local rarCol = item.RarityColor or (item.Rarity and RARITY_COLORS[item.Rarity])
+				local rarCol = getReadableRarityColor(item.RarityColor or (item.Rarity and RARITY_COLORS[item.Rarity]))
 				local isNone = (id == "None" or id == "__none")
 
 				local b = make("TextButton", {
