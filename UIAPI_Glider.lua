@@ -3743,10 +3743,22 @@ function Tab:AddImageGrid(opts)
 		local NEUTRAL_SEL = Color3.fromRGB(90, 85, 95)
 		for id, t in pairs(tiles) do
 			local on = (id == el.Value)
+			local rarCol = t.RarityColor
+			local isNone = (id == "None" or id == "__none")
 			if t.Ring then
-				t.Ring.Color = on and NEUTRAL_SEL or T.Rule2
-				t.Ring.Transparency = on and 0.1 or 0.6
-				t.Ring.Thickness = on and 1.5 or 1
+				if on then
+					t.Ring.Color = NEUTRAL_SEL
+					t.Ring.Transparency = 0.1
+					t.Ring.Thickness = 1.5
+				elseif rarCol and not isNone then
+					t.Ring.Color = rarCol
+					t.Ring.Transparency = 0.45
+					t.Ring.Thickness = 1
+				else
+					t.Ring.Color = T.Rule2
+					t.Ring.Transparency = 0.6
+					t.Ring.Thickness = 1
+				end
 			end
 			if t.Button then
 				t.Button.BackgroundColor3 = on and T.ChromeRaised or T.PageRaised
@@ -3799,6 +3811,7 @@ function Tab:AddImageGrid(opts)
 				local id = tostring(item.Id or ("item" .. i))
 				local rarityText = item.Rarity or "Default"
 				local rarityCol = item.RarityColor or RARITY_COLORS[rarityText] or RARITY_COLORS.Default
+				local isNone = (id == "None" or id == "__none")
 				local isEquipped = (id == el.Value) or (item.Equipped == true)
 
 				local b = make("TextButton", {
@@ -3821,7 +3834,14 @@ function Tab:AddImageGrid(opts)
 						Size = UDim2.fromScale(1, 1), Parent = img,
 					})
 				end
-				local ring = stroke("Rule2", 1, 0.6)
+				local ring = stroke("Rule2", 1, isEquipped and 0.1 or ((rarCol and not isNone) and 0.45 or 0.6))
+				if isEquipped then
+					ring.Color = NEUTRAL_SEL
+					ring.Thickness = 1.5
+				elseif rarCol and not isNone then
+					ring.Color = rarCol
+					ring.Thickness = 1
+				end
 				ring.Parent = b
 
 				-- Top-right Equipped badge
@@ -3859,14 +3879,14 @@ function Tab:AddImageGrid(opts)
 				tiles[id] = {
 					Button = b, Image = img, Ring = ring, NameLabel = nm,
 					RarityLabel = rLbl, RarityBar = rarityBar,
-					EquippedBadge = eqBadge,
+					EquippedBadge = eqBadge, RarityColor = rarityCol,
 				}
 
 				b.MouseEnter:Connect(function()
 					local on = (id == el.Value)
 					tween(b, { BackgroundTransparency = on and 0.2 or 0.38 })
 					if ring and not on then
-						tween(ring, { Transparency = 0.35, Color = Color3.fromRGB(90, 85, 95) })
+						tween(ring, { Transparency = 0.2, Color = (rarCol and not isNone) and rarCol or NEUTRAL_SEL })
 					end
 					if el.OnHover then pcall(el.OnHover, id, item, true) end
 				end)
@@ -3874,7 +3894,7 @@ function Tab:AddImageGrid(opts)
 					local on = (id == el.Value)
 					tween(b, { BackgroundTransparency = on and 0.25 or 0.55 })
 					if ring and not on then
-						tween(ring, { Transparency = 0.65, Color = CURRENT_THEME.Rule2 })
+						tween(ring, { Transparency = (rarCol and not isNone) and 0.45 or 0.65, Color = (rarCol and not isNone) and rarCol or CURRENT_THEME.Rule2 })
 					end
 					if el.OnHover then pcall(el.OnHover, id, item, false) end
 				end)
