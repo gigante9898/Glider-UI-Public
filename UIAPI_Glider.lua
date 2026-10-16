@@ -148,13 +148,16 @@ local SLIDE = TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.O
 -- ---------------------------------------------------------------------------
 local CONNS = {}
 local RARITY_COLORS = {
-	Common    = Color3.fromRGB(80, 200, 80),
-	Uncommon  = Color3.fromRGB(100, 220, 100),
-	Rare      = Color3.fromRGB(0, 210, 255),
-	Epic      = Color3.fromRGB(170, 60, 240),
-	Legendary = Color3.fromRGB(255, 60, 40),
-	Mythical  = Color3.fromRGB(240, 70, 255),
-	Default   = Color3.fromRGB(140, 140, 145),
+	Common       = Color3.fromRGB(80, 200, 80),
+	Uncommon     = Color3.fromRGB(100, 220, 100),
+	Rare         = Color3.fromRGB(0, 210, 255),
+	Epic         = Color3.fromRGB(170, 60, 240),
+	Legendary    = Color3.fromRGB(255, 60, 40),
+	Mythical     = Color3.fromRGB(240, 70, 255),
+	Genuine      = Color3.fromRGB(60, 190, 110),
+	Unique       = Color3.fromRGB(255, 140, 0),
+	Unobtainable = Color3.fromRGB(160, 40, 230),
+	Default      = Color3.fromRGB(140, 140, 145),
 }
 local function connect(signal, fn)
 	local c = signal:Connect(fn)
@@ -645,6 +648,7 @@ local Library = {
 	IsMobile = IS_MOBILE,
 	Sounds = SOUNDS,
 	SoundEnabled = true,
+	RarityColors = RARITY_COLORS,
 	Icons = {
 		Combat     = 119168694531898,
 		Player     = 127505433136549,
@@ -4851,11 +4855,18 @@ function Library:CreateSidePanel(title, opts)
 
 			clone.Parent = worldModel
 			self.CurrentModel = clone
+			self._animTextures = {}
+			for _, d in ipairs(clone:GetDescendants()) do
+				if d:IsA("Texture") then
+					table.insert(self._animTextures, d)
+				end
+			end
 			self:UpdateCamera()
 			return clone
 		end
 
 		function vp:Clear()
+			self._animTextures = nil
 			if self.CurrentModel then
 				pcall(function() self.CurrentModel:Destroy() end)
 				self.CurrentModel = nil
@@ -4873,11 +4884,24 @@ function Library:CreateSidePanel(title, opts)
 		end
 
 		vp._conn = RunService.RenderStepped:Connect(function(dt)
-			if vp.IsRotating and card.Visible and card.Parent and vp.CurrentModel and vp.CurrentModel.Parent then
+			if card.Visible and card.Parent and vp.CurrentModel and vp.CurrentModel.Parent then
 				local lib = Library._window
 				if lib and lib.Visible == false then return end
-				vp.Yaw = (vp.Yaw + dt * vp.RotateSpeed) % (math.pi * 2)
-				vp:UpdateCamera()
+				if vp.IsRotating then
+					vp.Yaw = (vp.Yaw + dt * vp.RotateSpeed) % (math.pi * 2)
+					vp:UpdateCamera()
+				end
+				if vp._animTextures and #vp._animTextures > 0 then
+					local now = os.clock()
+					for _, tex in ipairs(vp._animTextures) do
+						if tex.Parent then
+							local su = tex.StudsPerTileU > 0 and tex.StudsPerTileU or 1
+							local sv = tex.StudsPerTileV > 0 and tex.StudsPerTileV or 1
+							tex.OffsetStudsU = (now * 0.7) % su
+							tex.OffsetStudsV = (now * 0.35) % sv
+						end
+					end
+				end
 			end
 		end)
 
@@ -5133,14 +5157,21 @@ function Library:CreateSidePanel(title, opts)
 				local name = tostring(item.Name or id)
 				local isSel = (id == currentPick)
 
+				local rarCol = item.RarityColor or (item.Rarity and RARITY_COLORS[item.Rarity])
+				local isNone = (id == "None" or id == K.NONE_ID)
+
 				local b = make("TextButton", {
 					Name = "Tile_" .. id, Text = "", AutoButtonColor = false,
 					BackgroundTransparency = isSel and 0.25 or 0.5, BorderSizePixel = 0,
 					LayoutOrder = i, Parent = scroll,
 				}, { BackgroundColor3 = "PageRaised" }, { corner(6) })
 
-				local ring = stroke("Rule2", 1, isSel and 0.15 or 0.65)
-				if isSel then ring.Color = NEUTRAL_SEL end
+				local ring = stroke("Rule2", 1, isSel and 0.15 or ((rarCol and not isNone) and 0.45 or 0.65))
+				if isSel then
+					ring.Color = NEUTRAL_SEL
+				elseif rarCol and not isNone then
+					ring.Color = rarCol
+				end
 				ring.Parent = b
 
 				local prevContainer = make("Frame", {
@@ -5153,6 +5184,15 @@ function Library:CreateSidePanel(title, opts)
 				}, {
 					BackgroundColor3 = item.Color and "ChromeBg" or "PageBg",
 				}, { corner(4) })
+
+				if rarCol and not isNone then
+					create("Frame", {
+						Name = "RarityBar", Size = UDim2.new(1, -8, 0, 2),
+						Position = UDim2.new(0, 4, 1, -18), BorderSizePixel = 0,
+						BackgroundColor3 = rarCol, BackgroundTransparency = 0.25,
+						Parent = b,
+					}, { corner(1) })
+				end
 
 				local hasImg = (item.Image and item.Image ~= "")
 				local previewInstance = create("ImageLabel", {
@@ -5191,13 +5231,17 @@ function Library:CreateSidePanel(title, opts)
 				b.MouseEnter:Connect(function()
 					local active = (id == currentPick)
 					tween(b, { BackgroundTransparency = active and 0.2 or 0.35 })
-					if ring and not active then tween(ring, { Transparency = 0.35, Color = NEUTRAL_SEL }) end
+					if ring and not active then
+						tween(ring, { Transparency = 0.15, Color = (rarCol and not isNone) and rarCol or NEUTRAL_SEL })
+					end
 					if gridObj.OnHover then gridObj.OnHover(id, item, true) end
 				end)
 				b.MouseLeave:Connect(function()
 					local active = (id == currentPick)
 					tween(b, { BackgroundTransparency = active and 0.25 or 0.5 })
-					if ring and not active then tween(ring, { Transparency = 0.65, Color = CURRENT_THEME.Rule2 }) end
+					if ring and not active then
+						tween(ring, { Transparency = (rarCol and not isNone) and 0.45 or 0.65, Color = (rarCol and not isNone) and rarCol or CURRENT_THEME.Rule2 })
+					end
 					if gridObj.OnHover then gridObj.OnHover(id, item, false) end
 				end)
 				b.MouseButton1Click:Connect(function()
@@ -5239,9 +5283,11 @@ function Library:CreateSidePanel(title, opts)
 			local T = CURRENT_THEME
 			for tId, t in pairs(tiles) do
 				local active = (tId == currentPick)
+				local tRar = t.Item and (t.Item.RarityColor or (t.Item.Rarity and RARITY_COLORS[t.Item.Rarity]))
+				local tIsNone = (tId == "None" or tId == K.NONE_ID)
 				if t.Ring then
-					t.Ring.Color = active and NEUTRAL_SEL or T.Rule2
-					t.Ring.Transparency = active and 0.15 or 0.65
+					t.Ring.Color = active and NEUTRAL_SEL or ((tRar and not tIsNone) and tRar or T.Rule2)
+					t.Ring.Transparency = active and 0.15 or ((tRar and not tIsNone) and 0.45 or 0.65)
 				end
 				if t.Button then
 					t.Button.BackgroundTransparency = active and 0.25 or 0.5
