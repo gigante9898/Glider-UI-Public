@@ -5284,7 +5284,7 @@ function Library:CreateSidePanel(title, opts)
 			for tId, t in pairs(tiles) do
 				local active = (tId == currentPick)
 				local tRar = t.Item and (t.Item.RarityColor or (t.Item.Rarity and RARITY_COLORS[t.Item.Rarity]))
-				local tIsNone = (tId == "None" or tId == K.NONE_ID)
+				local tIsNone = (tId == "None" or tId == "__none")
 				if t.Ring then
 					t.Ring.Color = active and NEUTRAL_SEL or ((tRar and not tIsNone) and tRar or T.Rule2)
 					t.Ring.Transparency = active and 0.15 or ((tRar and not tIsNone) and 0.45 or 0.65)
