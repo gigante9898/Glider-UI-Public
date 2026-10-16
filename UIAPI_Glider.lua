@@ -594,6 +594,35 @@ function Storage.saveWatermark(on) writeGlobal("watermark.txt", on and "1" or "0
 function Storage.loadWatermark() return loadBit("watermark.txt") end
 function Storage.saveKeyHUD(on) writeGlobal("keyhud.txt", on and "1" or "0") end
 function Storage.loadKeyHUD() return loadBit("keyhud.txt") end
+function Storage.saveWindowSize(w, h)
+	if type(w) == "number" and type(h) == "number" then
+		local data = HttpService:JSONEncode({ Width = math.floor(w), Height = math.floor(h) })
+		writeGlobal("window_size.json", data)
+		if HAS_FS then
+			pcall(function()
+				if not isfolder(Storage.Folder) then makefolder(Storage.Folder) end
+				writefile(Storage.Folder .. "/window_size.json", data)
+			end)
+		end
+	end
+end
+function Storage.loadWindowSize()
+	local raw = nil
+	if HAS_FS then
+		pcall(function()
+			local p = Storage.Folder .. "/window_size.json"
+			if isfile(p) then raw = readfile(p) end
+		end)
+	end
+	if not raw then raw = readGlobal("window_size.json") end
+	if raw and raw ~= "" then
+		local ok, data = pcall(function() return HttpService:JSONDecode(raw) end)
+		if ok and type(data) == "table" and type(data.Width) == "number" and type(data.Height) == "number" then
+			return data
+		end
+	end
+	return nil
+end
 
 -- Settings flags that are global preferences, not part of any config: configs never
 -- save, load or reset them, and Unload leaves them alone.
@@ -768,10 +797,15 @@ function Library.new(opts)
 	})
 	self.Gui.Parent = guiParent(self.Gui)
 
+	-- Window size persistence (remembers size across executions / games)
+	local savedWinSize = Storage.loadWindowSize()
+	local initW = (savedWinSize and savedWinSize.Width) or opts.Width or 880
+	local initH = (savedWinSize and savedWinSize.Height) or opts.Height or 560
+
 	-- Main Window Frame (never a CanvasGroup: it renders the whole menu darker)
 	self.Main = make("Frame", {
 		Name = "MainWindow",
-		Size = UDim2.fromOffset(opts.Width or 880, opts.Height or 560),
+		Size = UDim2.fromOffset(initW, initH),
 		Position = UDim2.fromScale(0.5, 0.5),
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		BorderSizePixel = 0,
@@ -954,20 +988,31 @@ function Library.new(opts)
 		if isPress(i) then
 			resizing, rStart, rSize, rPos = true, i.Position, self.Main.Size, self.Main.Position
 			i.Changed:Connect(function()
-				if i.UserInputState == Enum.UserInputState.End then resizing = false end
+				if i.UserInputState == Enum.UserInputState.End then
+					if resizing then
+						resizing = false
+						Storage.saveWindowSize(self.Main.Size.X.Offset, self.Main.Size.Y.Offset)
+					end
+				end
 			end)
 		end
 	end)
 	connect(UIS.InputChanged, function(i)
 		if resizing and isMove(i) then
 			local d = i.Position - rStart
-			local w = math.clamp(rSize.X.Offset + d.X, 500, 1250)
-			local h = math.clamp(rSize.Y.Offset + d.Y, 420, 920)
+			local w = math.clamp(rSize.X.Offset + d.X, 550, 1400)
+			local h = math.clamp(rSize.Y.Offset + d.Y, 420, 950)
 			self.Main.Size = UDim2.fromOffset(w, h)
 			self.Main.Position = UDim2.new(
 				rPos.X.Scale, rPos.X.Offset + (w - rSize.X.Offset) / 2,
 				rPos.Y.Scale, rPos.Y.Offset + (h - rSize.Y.Offset) / 2
 			)
+		end
+	end)
+	connect(UIS.InputEnded, function(i)
+		if resizing and isPress(i) then
+			resizing = false
+			Storage.saveWindowSize(self.Main.Size.X.Offset, self.Main.Size.Y.Offset)
 		end
 	end)
 
@@ -3658,16 +3703,16 @@ function Tab:AddImageGrid(opts)
 		if w <= 0 then return end
 		local cols = opts.Columns or math.clamp(math.floor((w + gap) / (tileSize + gap)), 2, maxCols)
 		gridLayout.FillDirectionMaxCells = cols
-		cell = math.max(math.floor((w - (cols - 1) * gap) / cols), 80)
-		local extraH = (opts.CardStyle == "Rivals" or opts.ShowRarity) and 38 or 26
+		cell = math.max(math.floor((w - (cols - 1) * gap) / cols), 90)
+		local extraH = (opts.CardStyle == "Rivals" or opts.ShowRarity) and 42 or 28
 		gridLayout.CellSize = UDim2.fromOffset(cell, cell + extraH)
 		for _, t in pairs(tiles) do
 			if t.Image then
-				t.Image.Size = UDim2.new(1, -10, 0, cell - 8)
-				t.Image.Position = UDim2.fromOffset(5, 5)
+				t.Image.Size = UDim2.new(1, -6, 0, cell - 2)
+				t.Image.Position = UDim2.fromOffset(3, 3)
 			end
-			if t.NameLabel then t.NameLabel.Position = UDim2.new(0, 6, 0, cell) end
-			if t.RarityLabel then t.RarityLabel.Position = UDim2.new(0, 6, 0, cell + 15) end
+			if t.NameLabel then t.NameLabel.Position = UDim2.new(0, 6, 0, cell + 3) end
+			if t.RarityLabel then t.RarityLabel.Position = UDim2.new(0, 6, 0, cell + 19) end
 		end
 	end
 	scroll:GetPropertyChangedSignal("AbsoluteSize"):Connect(fitTiles)
@@ -3743,7 +3788,7 @@ function Tab:AddImageGrid(opts)
 
 				local img = create("ImageLabel", {
 					Name = "Thumb", BackgroundTransparency = 1, BorderSizePixel = 0,
-					Size = UDim2.new(1, -10, 0, cell - 8), Position = UDim2.fromOffset(5, 5),
+					Size = UDim2.new(1, -6, 0, cell - 2), Position = UDim2.fromOffset(3, 3),
 					Image = tostring(item.Image or ""), ScaleType = Enum.ScaleType.Fit,
 					Parent = b,
 				}, { corner(4) })
@@ -3779,15 +3824,15 @@ function Tab:AddImageGrid(opts)
 
 				-- Labels
 				local nm = label({
-					Text = tostring(item.Name or id), FontFace = FONTS.BodySemi, TextSize = 11.5,
+					Text = tostring(item.Name or id), FontFace = FONTS.BodySemi, TextSize = 12,
 					TextTruncate = TRUNC, TextXAlignment = Enum.TextXAlignment.Left,
-					Size = UDim2.new(1, -12, 0, 15), Position = UDim2.new(0, 6, 0, cell), Parent = b,
+					Size = UDim2.new(1, -12, 0, 15), Position = UDim2.new(0, 6, 0, cell + 3), Parent = b,
 				})
 				local rLbl = create("TextLabel", {
-					Name = "RarityLabel", Text = rarityText, FontFace = FONTS.Body, TextSize = 10,
+					Name = "RarityLabel", Text = rarityText, FontFace = FONTS.Body, TextSize = 10.5,
 					TextColor3 = rarityCol, BackgroundTransparency = 1, TextTruncate = TRUNC,
 					TextXAlignment = Enum.TextXAlignment.Left, Size = UDim2.new(1, -12, 0, 13),
-					Position = UDim2.new(0, 6, 0, cell + 15), Parent = b,
+					Position = UDim2.new(0, 6, 0, cell + 19), Parent = b,
 				})
 
 				tiles[id] = {
@@ -3798,9 +3843,9 @@ function Tab:AddImageGrid(opts)
 
 				b.MouseEnter:Connect(function()
 					local on = (id == el.Value)
-					tween(b, { BackgroundTransparency = on and 0.2 or 0.35 })
+					tween(b, { BackgroundTransparency = on and 0.2 or 0.38 })
 					if ring and not on then
-						tween(ring, { Transparency = 0.25, Color = CURRENT_THEME.Hover or CURRENT_THEME.Edge or CURRENT_THEME.Text })
+						tween(ring, { Transparency = 0.35, Color = Color3.fromRGB(90, 85, 95) })
 					end
 					if el.OnHover then pcall(el.OnHover, id, item, true) end
 				end)
@@ -3808,7 +3853,7 @@ function Tab:AddImageGrid(opts)
 					local on = (id == el.Value)
 					tween(b, { BackgroundTransparency = on and 0.25 or 0.55 })
 					if ring and not on then
-						tween(ring, { Transparency = 0.6, Color = CURRENT_THEME.Rule2 })
+						tween(ring, { Transparency = 0.65, Color = CURRENT_THEME.Rule2 })
 					end
 					if el.OnHover then pcall(el.OnHover, id, item, false) end
 				end)
@@ -5133,5 +5178,18 @@ function Library:CreateSidePanel(title, opts)
 end
 
 Library.AddSidePanel = Library.CreateSidePanel
+
+function Library:SaveWindowSize()
+	if self.Main then
+		Storage.saveWindowSize(self.Main.Size.X.Offset, self.Main.Size.Y.Offset)
+	end
+end
+
+function Library:ResetWindowSize()
+	Storage.saveWindowSize(880, 560)
+	if self.Main then
+		self.Main.Size = UDim2.fromOffset(880, 560)
+	end
+end
 
 return Library
