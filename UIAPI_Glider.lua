@@ -4931,19 +4931,23 @@ function Library:CreateSidePanel(title, opts)
 	-- Sub-Tabs / Pills Row (e.g. [ Wrap ] [ Charm ] [ Kill effect ])
 	function panel:AddPills(pillList, defaultPick, callback)
 		pillList = pillList or {}
+		local count = #pillList
+		local gap = 6
 		local container = create("Frame", {
 			Name = "PillsRow", Size = UDim2.new(1, 0, 0, 30),
 			BackgroundTransparency = 1, BorderSizePixel = 0, LayoutOrder = 3,
 			Parent = content,
-		}, { list(6, Enum.FillDirection.Horizontal, { VerticalAlignment = Enum.VerticalAlignment.Center }) })
+		}, { list(gap, Enum.FillDirection.Horizontal, { VerticalAlignment = Enum.VerticalAlignment.Center }) })
 
 		local NEUTRAL_SEL = Color3.fromRGB(90, 85, 95)
 		local pills = { Value = defaultPick or (pillList[1] or ""), Buttons = {} }
+		local pillWidth = count > 0 and UDim2.new(1 / count, -math.floor((count - 1) * gap / count), 1, -4) or UDim2.new(1, 0, 1, -4)
+
 		for _, name in ipairs(pillList) do
 			local isSel = (name == pills.Value)
 			local b = make("TextButton", {
 				Name = "Pill_" .. name, Text = name, FontFace = FONTS.BodySemi, TextSize = 11,
-				AutoButtonColor = false, AutomaticSize = AX, Size = UDim2.new(0, 0, 1, -4),
+				AutoButtonColor = false, Size = pillWidth, TextXAlignment = Enum.TextXAlignment.Center,
 				Parent = container,
 			}, {
 				BackgroundColor3 = isSel and "PageRaised" or "ChromeBg",
@@ -4951,7 +4955,6 @@ function Library:CreateSidePanel(title, opts)
 			}, {
 				corner(4),
 				stroke("Rule2", 1, isSel and 0.15 or 0.65),
-				padding(10, 0),
 			})
 			local str = b:FindFirstChildOfClass("UIStroke")
 			if str and isSel then str.Color = NEUTRAL_SEL end
@@ -5098,7 +5101,12 @@ function Library:CreateSidePanel(title, opts)
 
 		function gridObj:SetItems(items)
 			items = items or {}
-			for _, t in pairs(tiles) do if t.Button then pcall(function() t.Button:Destroy() end) end end
+			for _, t in pairs(tiles) do
+				if t.Item and type(t.Item.Destroy) == "function" then
+					pcall(t.Item.Destroy, t.Item)
+				end
+				if t.Button then pcall(function() t.Button:Destroy() end) end
+			end
 			table.clear(tiles)
 
 			for i, item in ipairs(items) do
@@ -5116,17 +5124,44 @@ function Library:CreateSidePanel(title, opts)
 				if isSel then ring.Color = NEUTRAL_SEL end
 				ring.Parent = b
 
-				local hasImg = (item.Image and item.Image ~= "")
-				local preview = create("ImageLabel", {
-					Name = "Preview",
-					BackgroundColor3 = item.Color or Color3.fromRGB(35, 30, 42),
-					BackgroundTransparency = (item.Color and not hasImg) and 0 or (hasImg and 1 or 0.8),
+				local prevContainer = make("Frame", {
+					Name = "PreviewContainer",
+					Size = UDim2.new(1, -6, 1, -22),
+					Position = UDim2.fromOffset(3, 3),
 					BorderSizePixel = 0,
-					Size = UDim2.new(1, -6, 1, -22), Position = UDim2.fromOffset(3, 3),
-					Image = hasImg and item.Image or (item.Color and "" or "rbxassetid://112715941288555"),
-					ImageTransparency = 0,
-					ScaleType = Enum.ScaleType.Crop, Parent = b,
+					ClipsDescendants = true,
+					Parent = b,
+				}, {
+					BackgroundColor3 = item.Color and "ChromeBg" or "PageBg",
 				}, { corner(4) })
+
+				local previewInstance
+				if typeof(item.Frame) == "Instance" then
+					previewInstance = item.Frame
+					previewInstance.Size = UDim2.fromScale(1, 1)
+					previewInstance.Position = UDim2.fromScale(0, 0)
+					previewInstance.BackgroundTransparency = 1
+					previewInstance.Parent = prevContainer
+				elseif type(item.CreatePreview) == "function" then
+					local ok, res = pcall(item.CreatePreview, prevContainer)
+					if ok and typeof(res) == "Instance" and res.Parent ~= prevContainer then
+						res.Size = UDim2.fromScale(1, 1)
+						res.Parent = prevContainer
+					end
+				else
+					local hasImg = (item.Image and item.Image ~= "")
+					previewInstance = create("ImageLabel", {
+						Name = "PreviewImage",
+						BackgroundColor3 = item.Color or Color3.fromRGB(35, 30, 42),
+						BackgroundTransparency = (item.Color and not hasImg) and 0 or (hasImg and 1 or 0.8),
+						BorderSizePixel = 0,
+						Size = UDim2.fromScale(1, 1),
+						Image = hasImg and item.Image or (item.Color and "" or "rbxassetid://112715941288555"),
+						ImageTransparency = 0,
+						ScaleType = Enum.ScaleType.Crop,
+						Parent = prevContainer,
+					})
+				end
 
 				local nm = label({
 					Text = name, FontFace = FONTS.Body, TextSize = 10,
@@ -5135,7 +5170,7 @@ function Library:CreateSidePanel(title, opts)
 					Position = UDim2.new(0, 2, 1, -16), Parent = b,
 				})
 
-				tiles[id] = { Button = b, Preview = preview, Ring = ring, Label = nm, Item = item }
+				tiles[id] = { Button = b, PreviewContainer = prevContainer, Ring = ring, Label = nm, Item = item }
 
 				b.MouseEnter:Connect(function()
 					local active = (id == currentPick)
