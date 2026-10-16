@@ -3589,15 +3589,14 @@ end
 -- ---------------------------------------------------------------------------
 function Tab:AddImageGrid(opts)
 	opts = opts or {}
-	local columns = opts.Columns or 4
-	local tileSize = opts.TileSize or 112
-	local gridH = opts.GridHeight or 300
+	local columns = opts.Columns or 5
+	local tileSize = opts.TileSize or 128
+	local gridH = opts.GridHeight or 320
 	local el = {
 		Type = "ImageGrid",
 		Value = opts.Default or "",
 		OnHover = opts.OnHover,
 		OnClick = opts.OnClick,
-		OnCustomize = opts.OnCustomize,
 	}
 	register(el, opts, self)
 	local items = opts.Items or {}
@@ -3617,8 +3616,8 @@ function Tab:AddImageGrid(opts)
 	end
 
 	local gridLayout = create("UIGridLayout", {
-		CellSize = UDim2.fromOffset(tileSize, tileSize + 28),
-		CellPadding = UDim2.fromOffset(8, 8),
+		CellSize = UDim2.fromOffset(tileSize, tileSize + 36),
+		CellPadding = UDim2.fromOffset(10, 10),
 		FillDirectionMaxCells = columns,
 		SortOrder = Enum.SortOrder.LayoutOrder,
 		HorizontalAlignment = Enum.HorizontalAlignment.Center,
@@ -3652,23 +3651,23 @@ function Tab:AddImageGrid(opts)
 
 	local tiles = {}
 	local cell = tileSize
-	local gap, maxCols = 8, 8
+	local gap, maxCols = 10, 7
 
 	local function fitTiles()
 		local w = scroll.AbsoluteSize.X - 8
 		if w <= 0 then return end
 		local cols = opts.Columns or math.clamp(math.floor((w + gap) / (tileSize + gap)), 2, maxCols)
 		gridLayout.FillDirectionMaxCells = cols
-		cell = math.max(math.floor((w - (cols - 1) * gap) / cols), 64)
-		local extraH = (opts.CardStyle == "Rivals" or opts.ShowRarity) and 34 or 24
+		cell = math.max(math.floor((w - (cols - 1) * gap) / cols), 80)
+		local extraH = (opts.CardStyle == "Rivals" or opts.ShowRarity) and 38 or 26
 		gridLayout.CellSize = UDim2.fromOffset(cell, cell + extraH)
 		for _, t in pairs(tiles) do
 			if t.Image then
-				t.Image.Size = UDim2.new(1, -8, 0, cell - 8)
-				t.Image.Position = UDim2.fromOffset(4, 4)
+				t.Image.Size = UDim2.new(1, -10, 0, cell - 8)
+				t.Image.Position = UDim2.fromOffset(5, 5)
 			end
-			if t.NameLabel then t.NameLabel.Position = UDim2.new(0, 4, 0, cell - 2) end
-			if t.RarityLabel then t.RarityLabel.Position = UDim2.new(0, 4, 0, cell + 12) end
+			if t.NameLabel then t.NameLabel.Position = UDim2.new(0, 6, 0, cell) end
+			if t.RarityLabel then t.RarityLabel.Position = UDim2.new(0, 6, 0, cell + 15) end
 		end
 	end
 	scroll:GetPropertyChangedSignal("AbsoluteSize"):Connect(fitTiles)
@@ -3680,8 +3679,8 @@ function Tab:AddImageGrid(opts)
 			local on = (id == el.Value)
 			if t.Ring then
 				t.Ring.Color = on and T.Accent or T.Rule2
-				t.Ring.Transparency = on and 0 or 0.55
-				t.Ring.Thickness = on and 1.8 or 1
+				t.Ring.Transparency = on and 0 or 0.6
+				t.Ring.Thickness = on and 1.6 or 1
 			end
 			if t.Button then
 				t.Button.BackgroundColor3 = on and T.ChromeRaised or T.PageRaised
@@ -3693,9 +3692,6 @@ function Tab:AddImageGrid(opts)
 			end
 			if t.EquippedBadge then
 				t.EquippedBadge.Visible = on
-			end
-			if t.CustomizeBtn then
-				t.CustomizeBtn.Visible = on
 			end
 			if t.NameLabel then
 				t.NameLabel.TextColor3 = on and T.Accent or T.Text
@@ -3722,7 +3718,6 @@ function Tab:AddImageGrid(opts)
 
 	function el:SetHoverCallback(fn) self.OnHover = fn end
 	function el:SetClickCallback(fn) self.OnClick = fn end
-	function el:SetCustomizeCallback(fn) self.OnCustomize = fn end
 
 	function el:SetItems(newItems, silent)
 		items = newItems or {}
@@ -3748,7 +3743,7 @@ function Tab:AddImageGrid(opts)
 
 				local img = create("ImageLabel", {
 					Name = "Thumb", BackgroundTransparency = 1, BorderSizePixel = 0,
-					Size = UDim2.new(1, -8, 0, cell - 8), Position = UDim2.fromOffset(4, 4),
+					Size = UDim2.new(1, -10, 0, cell - 8), Position = UDim2.fromOffset(5, 5),
 					Image = tostring(item.Image or ""), ScaleType = Enum.ScaleType.Fit,
 					Parent = b,
 				}, { corner(4) })
@@ -3760,22 +3755,22 @@ function Tab:AddImageGrid(opts)
 						Size = UDim2.fromScale(1, 1), Parent = img,
 					})
 				end
-				local ring = stroke("Rule2", 1, 0.55)
+				local ring = stroke("Rule2", 1, 0.6)
 				ring.Parent = b
 
 				-- Top-right Equipped badge
 				local eqBadge = make("Frame", {
-					Name = "EquippedBadge", Size = UDim2.fromOffset(44, 13),
-					Position = UDim2.new(1, -3, 0, 3), AnchorPoint = Vector2.new(1, 0),
+					Name = "EquippedBadge", Size = UDim2.fromOffset(48, 14),
+					Position = UDim2.new(1, -4, 0, 4), AnchorPoint = Vector2.new(1, 0),
 					BorderSizePixel = 0, Visible = isEquipped, ZIndex = 3, Parent = b,
 				}, { BackgroundColor3 = "Accent" }, { corner(3) })
 				label({
-					Text = "Equipped", FontFace = FONTS.Mono, TextSize = 8,
+					Text = "Equipped", FontFace = FONTS.Mono, TextSize = 8.5,
 					Role = "ChromeText", TextXAlignment = CENTER, TextYAlignment = Enum.TextYAlignment.Center,
 					Size = UDim2.fromScale(1, 1), Parent = eqBadge,
 				})
 
-				-- Bottom 2px rarity underline
+				-- Bottom 2.5px rarity underline
 				local rarityBar = create("Frame", {
 					Name = "RarityBar", Size = UDim2.new(1, 0, 0, 2),
 					Position = UDim2.new(0, 0, 1, -2), BorderSizePixel = 0, ZIndex = 2,
@@ -3784,49 +3779,37 @@ function Tab:AddImageGrid(opts)
 
 				-- Labels
 				local nm = label({
-					Text = tostring(item.Name or id), FontFace = FONTS.BodySemi, TextSize = 10,
+					Text = tostring(item.Name or id), FontFace = FONTS.BodySemi, TextSize = 11.5,
 					TextTruncate = TRUNC, TextXAlignment = Enum.TextXAlignment.Left,
-					Size = UDim2.new(1, -8, 0, 13), Position = UDim2.new(0, 4, 0, cell - 2), Parent = b,
+					Size = UDim2.new(1, -12, 0, 15), Position = UDim2.new(0, 6, 0, cell), Parent = b,
 				})
 				local rLbl = create("TextLabel", {
-					Name = "RarityLabel", Text = rarityText, FontFace = FONTS.Body, TextSize = 9,
+					Name = "RarityLabel", Text = rarityText, FontFace = FONTS.Body, TextSize = 10,
 					TextColor3 = rarityCol, BackgroundTransparency = 1, TextTruncate = TRUNC,
-					TextXAlignment = Enum.TextXAlignment.Left, Size = UDim2.new(1, -8, 0, 12),
-					Position = UDim2.new(0, 4, 0, cell + 12), Parent = b,
+					TextXAlignment = Enum.TextXAlignment.Left, Size = UDim2.new(1, -12, 0, 13),
+					Position = UDim2.new(0, 6, 0, cell + 15), Parent = b,
 				})
-
-				-- In-card Customize button
-				local custBtn = make("TextButton", {
-					Name = "CustomizeBtn", Text = "Customize", FontFace = FONTS.BodySemi, TextSize = 10,
-					AutoButtonColor = false, BackgroundTransparency = 0.25, BorderSizePixel = 0,
-					Size = UDim2.new(1, -12, 0, 18), Position = UDim2.new(0.5, 0, 0.45, 0),
-					AnchorPoint = Vector2.new(0.5, 0.5), Visible = isEquipped, ZIndex = 4, Parent = b,
-				}, { BackgroundColor3 = "PageBg", TextColor3 = "Text" }, { corner(4), stroke("Accent", 1) })
-
-				custBtn.MouseButton1Click:Connect(function()
-					playSound("Click")
-					if opts.OnCustomize then pcall(opts.OnCustomize, id, item) end
-					if el.OnCustomize then pcall(el.OnCustomize, id, item) end
-				end)
 
 				tiles[id] = {
 					Button = b, Image = img, Ring = ring, NameLabel = nm,
 					RarityLabel = rLbl, RarityBar = rarityBar,
-					EquippedBadge = eqBadge, CustomizeBtn = custBtn,
+					EquippedBadge = eqBadge,
 				}
 
 				b.MouseEnter:Connect(function()
 					local on = (id == el.Value)
 					tween(b, { BackgroundTransparency = on and 0.2 or 0.35 })
-					if ring then tween(ring, { Transparency = on and 0 or 0.2, Color = on and CURRENT_THEME.Accent or CURRENT_THEME.Accent }) end
-					custBtn.Visible = true
+					if ring and not on then
+						tween(ring, { Transparency = 0.25, Color = CURRENT_THEME.Hover or CURRENT_THEME.Edge or CURRENT_THEME.Text })
+					end
 					if el.OnHover then pcall(el.OnHover, id, item, true) end
 				end)
 				b.MouseLeave:Connect(function()
 					local on = (id == el.Value)
 					tween(b, { BackgroundTransparency = on and 0.25 or 0.55 })
-					if ring then tween(ring, { Transparency = on and 0 or 0.55, Color = on and CURRENT_THEME.Accent or CURRENT_THEME.Rule2 }) end
-					custBtn.Visible = on
+					if ring and not on then
+						tween(ring, { Transparency = 0.6, Color = CURRENT_THEME.Rule2 })
+					end
 					if el.OnHover then pcall(el.OnHover, id, item, false) end
 				end)
 				b.MouseButton1Click:Connect(function()
