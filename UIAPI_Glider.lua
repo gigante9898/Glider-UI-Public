@@ -148,15 +148,15 @@ local SLIDE = TweenInfo.new(0.28, Enum.EasingStyle.Quint, Enum.EasingDirection.O
 -- ---------------------------------------------------------------------------
 local CONNS = {}
 local RARITY_COLORS = {
-	Common       = Color3.fromRGB(80, 200, 80),
-	Uncommon     = Color3.fromRGB(100, 220, 100),
-	Rare         = Color3.fromRGB(0, 210, 255),
-	Epic         = Color3.fromRGB(170, 60, 240),
-	Legendary    = Color3.fromRGB(255, 60, 40),
-	Mythical     = Color3.fromRGB(240, 70, 255),
-	Genuine      = Color3.fromRGB(60, 190, 110),
-	Unique       = Color3.fromRGB(255, 140, 0),
-	Unobtainable = Color3.fromRGB(160, 40, 230),
+	Common       = Color3.fromRGB(110, 220, 60), -- Rivals Green
+	Uncommon     = Color3.fromRGB(110, 220, 60),
+	Rare         = Color3.fromRGB(0, 210, 255),   -- Rivals Cyan
+	Epic         = Color3.fromRGB(110, 80, 230),  -- Rivals Purple
+	Legendary    = Color3.fromRGB(255, 45, 60),   -- Rivals Red
+	Mythical     = Color3.fromRGB(110, 80, 230),  -- Rivals Purple (Aegis, Blizzard, etc.)
+	Genuine      = Color3.fromRGB(75, 150, 65),   -- Rivals Olive
+	Unique       = Color3.fromRGB(255, 140, 0),   -- Rivals Orange
+	Unobtainable = Color3.fromRGB(140, 40, 200),  -- Rivals Dark Violet
 	Default      = Color3.fromRGB(140, 140, 145),
 }
 local function connect(signal, fn)
@@ -4829,7 +4829,7 @@ function Library:CreateSidePanel(title, opts)
 			camera.CFrame = CFrame.lookAt(camPos, Vector3.zero)
 		end
 
-		function vp:SetModel(inst)
+		function vp:SetModel(inst, isAnimated)
 			self:Clear()
 			if not inst then return nil end
 			local ok, clone = pcall(function() return inst:Clone() end)
@@ -4878,9 +4878,11 @@ function Library:CreateSidePanel(title, opts)
 			clone.Parent = worldModel
 			self.CurrentModel = clone
 			self._animTextures = {}
-			for _, d in ipairs(clone:GetDescendants()) do
-				if d:IsA("Texture") then
-					table.insert(self._animTextures, d)
+			if isAnimated == true then
+				for _, d in ipairs(clone:GetDescendants()) do
+					if d:IsA("Texture") then
+						table.insert(self._animTextures, d)
+					end
 				end
 			end
 			self:UpdateCamera()
@@ -5141,7 +5143,7 @@ function Library:CreateSidePanel(title, opts)
 			if w and w > 20 then
 				local cellW = math.floor((w - (cols - 1) * gap - 2) / cols)
 				if cellW > 30 then
-					gridLayout.CellSize = UDim2.fromOffset(cellW, cellW + 18)
+					gridLayout.CellSize = UDim2.fromOffset(cellW, cellW + 28)
 				end
 			end
 		end
@@ -5198,35 +5200,35 @@ function Library:CreateSidePanel(title, opts)
 
 				local prevContainer = make("Frame", {
 					Name = "PreviewContainer",
-					Size = UDim2.new(1, -6, 1, -22),
+					Size = UDim2.new(1, -6, 1, -29),
 					Position = UDim2.fromOffset(3, 3),
 					BorderSizePixel = 0,
 					ClipsDescendants = true,
 					Parent = b,
 				}, {
-					BackgroundColor3 = item.Color and "ChromeBg" or "PageBg",
+					BackgroundColor3 = "PageBg",
 				}, { corner(4) })
 
 				if rarCol and not isNone then
 					create("Frame", {
-						Name = "RarityBar", Size = UDim2.new(1, -8, 0, 2),
-						Position = UDim2.new(0, 4, 1, -18), BorderSizePixel = 0,
-						BackgroundColor3 = rarCol, BackgroundTransparency = 0.25,
+						Name = "RarityBar", Size = UDim2.new(1, 0, 0, 2),
+						Position = UDim2.new(0, 0, 1, -2), BorderSizePixel = 0,
+						BackgroundColor3 = rarCol, BackgroundTransparency = 0.2,
 						Parent = b,
-					}, { corner(1) })
+					})
 				end
 
 				local hasImg = (item.Image and item.Image ~= "")
 				local previewInstance = create("ImageLabel", {
 					Name = "PreviewImage",
-					BackgroundColor3 = item.Color or Color3.fromRGB(35, 30, 42),
-					BackgroundTransparency = (item.Color and not hasImg) and 0 or (hasImg and 1 or 0.8),
+					BackgroundColor3 = CURRENT_THEME.PageBg,
+					BackgroundTransparency = hasImg and 1 or 0.8,
 					BorderSizePixel = 0,
 					AnchorPoint = Vector2.new(0.5, 0.5),
 					Position = UDim2.fromScale(0.5, 0.5),
 					Size = UDim2.fromScale(1, 1),
-					Image = hasImg and item.Image or (item.Color and "" or "rbxassetid://112715941288555"),
-					ImageTransparency = 0,
+					Image = hasImg and item.Image or (isNone and "" or "rbxassetid://112715941288555"),
+					ImageTransparency = (not hasImg) and 0.45 or 0,
 					ScaleType = Enum.ScaleType.Crop,
 					Parent = prevContainer,
 				})
@@ -5242,11 +5244,31 @@ function Library:CreateSidePanel(title, opts)
 				end
 
 				local nm = label({
-					Text = name, FontFace = FONTS.Body, TextSize = 10,
+					Text = name, FontFace = FONTS.BodySemi, TextSize = 9.5,
 					Role = isSel and "Text" or "SubText", TextTruncate = TRUNC,
-					TextXAlignment = CENTER, Size = UDim2.new(1, -4, 0, 16),
-					Position = UDim2.new(0, 2, 1, -16), Parent = b,
+					TextXAlignment = CENTER, Size = UDim2.new(1, -4, 0, 13),
+					Position = UDim2.new(0, 2, 1, -24), Parent = b,
 				})
+
+				local rarityText = (item.Rarity and item.Rarity ~= "None" and item.Rarity ~= "Default") and tostring(item.Rarity) or ""
+				local rLbl = nil
+				if rarityText ~= "" then
+					rLbl = create("TextLabel", {
+						Name = "RarityLabel", Text = rarityText, FontFace = FONTS.Body, TextSize = 8.5,
+						TextColor3 = rarCol or CURRENT_THEME.SubText, BackgroundTransparency = 1, TextTruncate = TRUNC,
+						TextXAlignment = Enum.TextXAlignment.Center, Size = UDim2.new(1, -4, 0, 11),
+						Position = UDim2.new(0, 2, 1, -12), Parent = b,
+					})
+				end
+
+				if item.Animated == true then
+					create("TextLabel", {
+						Name = "AnimBadge", Text = "✦", FontFace = FONTS.Header, TextSize = 10,
+						TextColor3 = Color3.fromRGB(200, 220, 255), BackgroundTransparency = 1,
+						Size = UDim2.fromOffset(13, 13), Position = UDim2.new(1, -14, 0, 2),
+						ZIndex = 4, Parent = b,
+					})
+				end
 
 				tiles[id] = { Button = b, PreviewContainer = prevContainer, Ring = ring, Label = nm, Item = item }
 
