@@ -5378,6 +5378,51 @@ function Library:CreateSidePanel(title, opts)
 		return b
 	end
 
+	-- Simple Side Toggle
+	function panel:AddToggle(toggleOpts)
+		toggleOpts = toggleOpts or {}
+		local el = { Type = "Toggle", Value = toggleOpts.Default or false, Callback = toggleOpts.Callback }
+		local h = toggleOpts.Height or 28
+		local f = make("Frame", {
+			Name = "SideToggle", Size = UDim2.new(1, 0, 0, h),
+			BackgroundTransparency = 0.5, BorderSizePixel = 0,
+			Parent = content,
+		}, { BackgroundColor3 = "PageRaised" }, { corner(6), stroke("Rule2", 1, 0.4) })
+		el.Frame = f
+
+		local hit = create("TextButton", {
+			Text = "", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Parent = f,
+		})
+
+		label({
+			Text = toggleOpts.Name or "Toggle",
+			FontFace = FONTS.BodySemi,
+			TextSize = 11,
+			TextTruncate = TRUNC,
+			Size = UDim2.new(1, -50, 1, 0),
+			Position = UDim2.fromOffset(8, 0),
+			Parent = f,
+		})
+
+		local _, show = capsule(f, UDim2.new(1, -8, 0.5, 0))
+
+		function el:Set(v, silent)
+			self.Value = v
+			show(v, true)
+			if not silent then
+				playSound("Toggle")
+				if self.Callback then self.Callback(v) end
+			end
+		end
+
+		hit.MouseButton1Click:Connect(function()
+			el:Set(not el.Value)
+		end)
+
+		show(el.Value, false)
+		return el
+	end
+
 	-- Simple Side Section
 	function panel:AddSection(text)
 		local sec = make("Frame", {
