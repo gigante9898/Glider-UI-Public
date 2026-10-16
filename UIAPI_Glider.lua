@@ -4844,10 +4844,10 @@ function Library:CreateSidePanel(title, opts)
 			clone:PivotTo(CFrame.new(-center) * clone:GetPivot())
 
 			-- Auto-frame
-			local maxDim = math.max(size.X, size.Y, size.Z, 0.8)
+			local maxDim = math.max(size.X, size.Y, size.Z, 0.2)
 			local fovRad = math.rad(camera.FieldOfView)
 			local zoom = vpOpts.ZoomMultiplier or 1.04
-			self.Distance = math.max((maxDim * 0.5) / math.tan(fovRad * 0.5) * zoom, 1.4)
+			self.Distance = math.max((maxDim * 0.5) / math.tan(fovRad * 0.5) * zoom, 0.4)
 
 			clone.Parent = worldModel
 			self.CurrentModel = clone
