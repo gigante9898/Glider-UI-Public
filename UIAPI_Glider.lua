@@ -661,6 +661,9 @@ local Library = {
 	Components = {
 		Card = true, Banner = true, Stat = true, Chips = true, List = true,
 		ActionRow = true, CopyField = true, Prompt = true, Confirm = true,
+		-- Marks that every Tab:Add* widget honours opts.Parent, so callers can
+		-- nest widgets inside a card body (Tab:AddCard(...).Body).
+		Parent = true,
 	},
 	Icons = {
 		Combat     = 119168694531898,
@@ -4000,7 +4003,7 @@ function Tab:AddPills(opts)
 		Size = UDim2.new(1, 0, 0, 32),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
-		Parent = self.Page,
+		Parent = (opts and opts.Parent) or self.Page,
 	}, {
 		list(8, Enum.FillDirection.Horizontal, {
 			VerticalAlignment = Enum.VerticalAlignment.Center,
