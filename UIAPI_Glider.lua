@@ -2694,9 +2694,22 @@ function Tab:AddToggle(opts)
 
 	-- Dynamic caption: lets a toggle rewrite its own text on state change
 	-- (e.g. "Public party, appears on browse" / "Private, code only").
+	-- Animated: quick fade out, swap, fade in - never an instant cut.
 	function el:SetName(text)
 		opts.Name = text
-		pcall(function() titleLabel.Text = tostring(text) end)
+		text = tostring(text)
+		local token = (el._nameToken or 0) + 1
+		el._nameToken = token
+		task.spawn(function()
+			local same = false
+			pcall(function() same = (titleLabel.Text == text) end)
+			if same then return end
+			local tw = tween(titleLabel, { TextTransparency = 1 }, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
+			if tw then pcall(function() tw.Completed:Wait() end) else task.wait(0.1) end
+			if el._nameToken ~= token then return end
+			pcall(function() titleLabel.Text = text end)
+			tween(titleLabel, { TextTransparency = 0 }, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
+		end)
 	end
 
 	function el:Set(v, silent)
