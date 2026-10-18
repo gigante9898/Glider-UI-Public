@@ -2420,21 +2420,46 @@ local function sheetOf(tab)
 	return tab._section
 end
 
+-- A component container can be a tab (rows go into the current sheet) or a bare
+-- Frame such as a card body (rows go straight into it). Widgets created inside a
+-- card still register their flag and config against the tab that owns the card.
+local function contentHost(host)
+	if typeof(host) == "Instance" then
+		return host, nil
+	end
+	local sec = sheetOf(host)
+	return sec.Body, sec
+end
+
+local function nextOrder(host, parent)
+	if typeof(host) == "Instance" then
+		return #parent:GetChildren() + 1
+	end
+	return #sheetOf(host).Rows + 1
+end
+
+local function trackRow(host, frame)
+	if typeof(host) ~= "Instance" then
+		table.insert(sheetOf(host).Rows, frame)
+	end
+end
+
 -- A row without hover (content blocks). Every row but a sheet's first gets an inset top rule.
 local function block(tab, height)
-	local sec = sheetOf(tab)
+	local parent, sec = contentHost(tab)
 	local f = create("Frame", {
 		Size = UDim2.new(1, 0, 0, height),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
-		LayoutOrder = #sec.Rows + 1,
-		Parent = sec.Body,
+		LayoutOrder = nextOrder(tab, parent),
+		Parent = parent,
 	})
 	make("Frame", {
 		Name = "Rule", Size = UDim2.new(1, -PAD * 2, 0, 1), Position = UDim2.fromOffset(PAD, 0),
-		BackgroundTransparency = 0.35, BorderSizePixel = 0, Visible = #sec.Rows > 0, Parent = f,
+		BackgroundTransparency = 0.35, BorderSizePixel = 0,
+		Visible = sec ~= nil and #sec.Rows > 0, Parent = f,
 	}, {BackgroundColor3 = "Rule2"})
-	table.insert(sec.Rows, f)
+	trackRow(tab, f)
 	return f
 end
 
@@ -2535,7 +2560,7 @@ end
 
 function Tab:AddLabel(text, opts)
 	opts = opts or {}
-	local f = row(self, ROW_H)
+	local f = row((opts and opts.Parent) or self, ROW_H)
 	local l = label({
 		Text = text,
 		TextWrapped = true,
@@ -2572,8 +2597,8 @@ function Tab:AddLabel(text, opts)
 end
 
 -- A stronger full-width rule inside the current sheet.
-function Tab:AddDivider()
-	local div = block(self, 13)
+function Tab:AddDivider(opts)
+	local div = block((opts and opts.Parent) or self, 13)
 	div:FindFirstChild("Rule").Visible = false
 	make("Frame", {
 		Size = UDim2.new(1, 0, 0, 1),
@@ -2650,7 +2675,7 @@ function Tab:AddToggle(opts)
 	local window = self.Window
 	local el = {Type = "Toggle", Value = opts.Default or false}
 	register(el, opts, self)
-	local f = row(self, ROW_H)
+	local f = row((opts and opts.Parent) or self, ROW_H)
 	local hit = create("TextButton", {Text = "", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Parent = f})
 
 	label({
@@ -2697,7 +2722,7 @@ function Tab:AddSlider(opts)
 	local min, max, step = opts.Min or 0, opts.Max or 100, opts.Step or 1
 	local el = {Type = "Slider", Value = opts.Default or min}
 	register(el, opts, self)
-	local f = row(self, ROW_H)
+	local f = row((opts and opts.Parent) or self, ROW_H)
 	local VALUE_W = 80
 
 	label({
@@ -2809,7 +2834,7 @@ function Tab:AddButton(opts)
 	local el = {Type = "Button"}
 	register(el, opts, self)
 	local role = opts.Danger and "Danger" or "Accent"
-	local f = row(self, ROW_H)
+	local f = row((opts and opts.Parent) or self, ROW_H)
 
 	local btn = create("TextButton", {
 		Text = "",
@@ -2903,7 +2928,7 @@ function Tab:AddDropdown(opts)
 	local maxRender  = opts.MaxRender or 60
 	local el = {Type = "Dropdown", Value = opts.Default or opts.Options[1] or ""}
 	register(el, opts, self)
-	local f = row(self, ROW_H)
+	local f = row((opts and opts.Parent) or self, ROW_H)
 	f.ClipsDescendants = true
 
 	local hit = create("TextButton", {Text = "", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, ROW_H), Parent = f})
@@ -3039,7 +3064,7 @@ function Tab:AddMultiDropdown(opts)
 	local maxVisible = opts.MaxVisible or 8
 	local el = {Type = "MultiDropdown", Value = opts.Default or {}}
 	register(el, opts, self)
-	local f = row(self, ROW_H)
+	local f = row((opts and opts.Parent) or self, ROW_H)
 	f.ClipsDescendants = true
 
 	local hit = create("TextButton", {Text = "", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, ROW_H), Parent = f})
@@ -3187,7 +3212,7 @@ end
 function Tab:AddTextbox(opts)
 	local el = {Type = "Textbox", Value = opts.Default or ""}
 	register(el, opts, self)
-	local f = row(self, ROW_H)
+	local f = row((opts and opts.Parent) or self, ROW_H)
 	label({
 		Text = opts.Name, TextTruncate = TRUNC,
 		Size = UDim2.new(0.45, -PAD, 1, 0), Position = UDim2.fromOffset(PAD, 0), Parent = f,
@@ -3221,7 +3246,7 @@ function Tab:AddColorPicker(opts)
 	register(el, opts, self)
 	local SQ, BAR, BOX = 104, 8, 24
 	local bodyH = SQ + 10 + BAR + 12 + BOX
-	local f = row(self, ROW_H)
+	local f = row((opts and opts.Parent) or self, ROW_H)
 	f.ClipsDescendants = true
 
 	local hit = create("TextButton", {Text = "", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, ROW_H), Parent = f})
@@ -3352,7 +3377,7 @@ function Tab:AddKeybind(opts)
 		return el
 	end
 
-	local f = row(self, ROW_H)
+	local f = row((opts and opts.Parent) or self, ROW_H)
 	label({
 		Text = opts.Name, TextTruncate = TRUNC,
 		Size = UDim2.new(1, -150, 1, 0), Position = UDim2.fromOffset(PAD, 0), Parent = f,
@@ -3384,7 +3409,7 @@ end
 -- ---------------------------------------------------------------------------
 function Tab:AddProgressBar(opts)
 	local el = {Type = "ProgressBar", Value = opts.Default or 0}
-	local f = row(self, 58)
+	local f = row((opts and opts.Parent) or self, 58)
 	label({
 		Text = opts.Name or "Progress", TextTruncate = TRUNC,
 		Size = UDim2.new(1, -80, 0, 18), Position = UDim2.fromOffset(PAD, 14), Parent = f,
@@ -3492,7 +3517,7 @@ function Tab:AddModelGrid(opts)
 	local items = opts.Items or {}
 
 	-- Header row: grid name + selected value.
-	local f = row(self, ROW_H)
+	local f = row((opts and opts.Parent) or self, ROW_H)
 	label({
 		Text = opts.Name or "Models", TextTruncate = TRUNC,
 		Size = UDim2.new(0.55, -PAD, 0, ROW_H), Position = UDim2.fromOffset(PAD, 0), Parent = f,
@@ -3504,7 +3529,7 @@ function Tab:AddModelGrid(opts)
 	})
 
 	-- Body block: scrolling grid of tiles.
-	local body = block(self, gridH + PAD * 2)
+	local body = block((opts and opts.Parent) or self, gridH + PAD * 2)
 	local scroll = make("ScrollingFrame", {
 		Name = "ModelGrid", Size = UDim2.new(1, -PAD * 2, 1, -PAD),
 		Position = UDim2.fromOffset(PAD, PAD * 0.5), BackgroundTransparency = 1,
@@ -3698,7 +3723,7 @@ function Tab:AddImageGrid(opts)
 
 	local f, valueLabel
 	if not opts.HideHeader then
-		f = row(self, ROW_H)
+		f = row((opts and opts.Parent) or self, ROW_H)
 		label({
 			Text = opts.Name or "Images", TextTruncate = TRUNC,
 			Size = UDim2.new(0.55, -PAD, 0, ROW_H), Position = UDim2.fromOffset(PAD, 0), Parent = f,
@@ -3725,7 +3750,7 @@ function Tab:AddImageGrid(opts)
 			BackgroundTransparency = 1, BorderSizePixel = 0, Parent = self.Page,
 		})
 	else
-		body = block(self, gridH + PAD * 2)
+		body = block((opts and opts.Parent) or self, gridH + PAD * 2)
 	end
 
 	local scroll = make("ScrollingFrame", {
@@ -4040,7 +4065,7 @@ function Tab:AddIconRow(opts)
 	register(el, opts, self)
 	local items = opts.Items or {}
 
-	local f = row(self, ROW_H)
+	local f = row((opts and opts.Parent) or self, ROW_H)
 	label({
 		Text = opts.Name or "Pick", TextTruncate = TRUNC,
 		Size = UDim2.new(0.55, -PAD, 0, ROW_H), Position = UDim2.fromOffset(PAD, 0), Parent = f,
@@ -4051,7 +4076,7 @@ function Tab:AddIconRow(opts)
 		AnchorPoint = Vector2.new(1, 0), Parent = f,
 	})
 
-	local body = block(self, tileSize + 14 + PAD * 2)
+	local body = block((opts and opts.Parent) or self, tileSize + 14 + PAD * 2)
 	local scroll = make("ScrollingFrame", {
 		Name = "IconRow", Size = UDim2.new(1, -PAD * 2, 1, -PAD),
 		Position = UDim2.fromOffset(PAD, PAD * 0.5), BackgroundTransparency = 1,
@@ -4211,21 +4236,22 @@ end
 -- A dynamic-height row on the current sheet. Unlike block(), its height follows
 -- its content, and its children are centered with PAD gutters on both sides.
 local function autoBlock(tab, gap)
-	local sec = sheetOf(tab)
+	local parent, sec = contentHost(tab)
 	local outer = create("Frame", {
 		Name = "AutoBlock",
 		Size = UDim2.new(1, 0, 0, 0),
 		AutomaticSize = AY,
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
-		LayoutOrder = #sec.Rows + 1,
-		Parent = sec.Body,
+		LayoutOrder = nextOrder(tab, parent),
+		Parent = parent,
 	}, { list(gap or 8, nil, { HorizontalAlignment = Enum.HorizontalAlignment.Center }) })
 	make("Frame", {
 		Name = "Rule", Size = UDim2.new(1, -PAD * 2, 0, 1), BackgroundTransparency = 0.35,
-		BorderSizePixel = 0, LayoutOrder = 0, Visible = #sec.Rows > 0, Parent = outer,
+		BorderSizePixel = 0, LayoutOrder = 0,
+		Visible = sec ~= nil and #sec.Rows > 0, Parent = outer,
 	}, { BackgroundColor3 = "Rule2" })
-	table.insert(sec.Rows, outer)
+	trackRow(tab, outer)
 	return outer
 end
 
@@ -4263,7 +4289,7 @@ function Tab:AddCard(opts)
 	local collapsed = opts.Collapsed and true or false
 	local headH = 40
 
-	local lane = autoBlock(self, 0)
+	local lane = autoBlock((opts and opts.Parent) or self, 0)
 	local laneRule = lane:FindFirstChild("Rule")
 	if laneRule then laneRule.Visible = false end -- the card carries its own border
 
@@ -4356,7 +4382,7 @@ function Tab:AddBanner(opts)
 	local kind = opts.Kind or "Info"
 	local dismissable = opts.Dismissable and true or false
 
-	local outer = autoBlock(self, 0)
+	local outer = autoBlock((opts and opts.Parent) or self, 0)
 	local box = create("Frame", {
 		Name = "Banner", Size = UDim2.new(1, -PAD * 2, 0, 0), AutomaticSize = AY,
 		BorderSizePixel = 0, ClipsDescendants = true, LayoutOrder = 1, Parent = outer,
@@ -4411,7 +4437,7 @@ end
 -- A key/value display row, optionally copyable.
 function Tab:AddStat(opts)
 	opts = opts or {}
-	local f = row(self, ROW_H)
+	local f = row((opts and opts.Parent) or self, ROW_H)
 	label({
 		Text = opts.Name, TextTruncate = TRUNC, Size = UDim2.new(0.5, -PAD, 1, 0),
 		Position = UDim2.fromOffset(PAD, 0), Parent = f,
@@ -4447,7 +4473,7 @@ local MAX_CHIPS = 12
 
 function Tab:AddChips(opts)
 	opts = opts or {}
-	local f = block(self, ROW_H)
+	local f = block((opts and opts.Parent) or self, ROW_H)
 	local emptyLbl = label({
 		Text = "", FontFace = FONTS.Italic, TextSize = 12, Role = "SubText",
 		Size = UDim2.new(1, -PAD * 2, 1, 0), Position = UDim2.fromOffset(PAD, 0), Parent = f,
@@ -4497,7 +4523,7 @@ function Tab:AddList(opts)
 	local query = ""
 	local el = {}
 
-	local outer = autoBlock(self, 0)
+	local outer = autoBlock((opts and opts.Parent) or self, 0)
 	local box = create("Frame", {
 		Name = "List", Size = UDim2.new(1, -PAD * 2, 0, 0), AutomaticSize = AY,
 		BackgroundTransparency = 1, BorderSizePixel = 0, LayoutOrder = 1, Parent = outer,
@@ -4745,7 +4771,7 @@ end
 -- A single row with up to N buttons side by side.
 function Tab:AddActionRow(opts)
 	opts = opts or {}
-	local f = row(self, ROW_H)
+	local f = row((opts and opts.Parent) or self, ROW_H)
 	local labelW = opts.Name and 0.4 or 0
 	if opts.Name then
 		label({
@@ -4784,7 +4810,7 @@ function Tab:AddCopyField(opts)
 	local mono = opts.Mono ~= false
 	local value = tostring(opts.Value or "")
 
-	local outer = autoBlock(self, 0)
+	local outer = autoBlock((opts and opts.Parent) or self, 0)
 	local box = create("Frame", {
 		Name = "CopyField", Size = UDim2.new(1, -PAD * 2, 0, 0), AutomaticSize = AY,
 		BackgroundTransparency = 1, BorderSizePixel = 0, LayoutOrder = 1, Parent = outer,
