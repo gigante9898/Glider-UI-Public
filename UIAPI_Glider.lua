@@ -4296,18 +4296,18 @@ function Tab:AddCard(opts)
 	local laneRule = lane:FindFirstChild("Rule")
 	if laneRule then laneRule.Visible = false end -- the card carries its own border
 
-	local card = make("Frame", {
+	local cardFrame = make("Frame", {
 		Name = "Card", Size = UDim2.new(1, -PAD * 2, 0, 0), AutomaticSize = AY,
 		BorderSizePixel = 0, ClipsDescendants = true, LayoutOrder = 1, Parent = lane,
 	}, { BackgroundColor3 = "PageRaised" }, { corner(6), stroke("Rule2", 1, 0.4) })
 
 	local accent = create("Frame", {
-		Name = "Accent", Size = UDim2.new(0, 3, 1, 0), BorderSizePixel = 0, ZIndex = 2, Parent = card,
+		Name = "Accent", Size = UDim2.new(0, 3, 1, 0), BorderSizePixel = 0, ZIndex = 2, Parent = cardFrame,
 	}, { BackgroundColor3 = accentRole })
 
 	local header = create("TextButton", {
 		Name = "Header", Text = "", AutoButtonColor = false, BackgroundTransparency = 1,
-		Active = collapsible, Size = UDim2.new(1, 0, 0, headH), Position = UDim2.fromOffset(3, 0), Parent = card,
+		Active = collapsible, Size = UDim2.new(1, 0, 0, headH), Position = UDim2.fromOffset(3, 0), Parent = cardFrame,
 	})
 	local titleX = pad + (collapsible and 16 or 0)
 	local title = label({
@@ -4343,7 +4343,7 @@ function Tab:AddCard(opts)
 
 	local body = create("Frame", {
 		Name = "Body", Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, BackgroundTransparency = 1,
-		Position = UDim2.fromOffset(3, headH), Parent = card,
+		Position = UDim2.fromOffset(3, headH), Parent = cardFrame,
 	}, { list(6), padding(pad, pad) })
 
 	local function setCollapsed(v)
@@ -4359,7 +4359,7 @@ function Tab:AddCard(opts)
 	end
 	setCollapsed(collapsed)
 
-	card.Body = body
+	local card = { Frame = cardFrame, Body = body }
 	function card:SetTitle(t) title.Text = tostring(t or "") end
 	function card:SetSub(t)
 		subLbl.Text = tostring(t or "")
