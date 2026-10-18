@@ -4301,9 +4301,14 @@ function Tab:AddCard(opts)
 		BorderSizePixel = 0, ClipsDescendants = true, LayoutOrder = 1, Parent = lane,
 	}, { BackgroundColor3 = "PageRaised" }, { corner(6), stroke("Rule2", 1, 0.4) })
 
-	local accent = create("Frame", {
-		Name = "Accent", Size = UDim2.new(0, 3, 1, 0), BorderSizePixel = 0, ZIndex = 2, Parent = cardFrame,
-	}, { BackgroundColor3 = accentRole })
+	-- No left rail by default: the card already has a border and a header, and the
+	-- rail read as a stray vertical line. opts.Bar = true brings it back.
+	local accent
+	if opts.Bar == true then
+		accent = create("Frame", {
+			Name = "Accent", Size = UDim2.new(0, 3, 1, 0), BorderSizePixel = 0, ZIndex = 2, Parent = cardFrame,
+		}, { BackgroundColor3 = accentRole })
+	end
 
 	local header = create("TextButton", {
 		Name = "Header", Text = "", AutoButtonColor = false, BackgroundTransparency = 1,
@@ -4372,7 +4377,7 @@ function Tab:AddCard(opts)
 	end
 	function card:SetAccent(role)
 		accentRole = role or "Accent"
-		paint(accent, { BackgroundColor3 = accentRole })
+		if accent then paint(accent, { BackgroundColor3 = accentRole }) end
 	end
 	function card:Toggle() setCollapsed(not collapsed) end
 	function card:Destroy() lane:Destroy() end
@@ -4392,9 +4397,13 @@ function Tab:AddBanner(opts)
 	}, { corner(4) })
 	paint(box, { BackgroundColor3 = KIND_ROLE[kind] or "Accent" })
 	box.BackgroundTransparency = 0.9
-	local accent = create("Frame", {
-		Name = "Accent", Size = UDim2.new(0, 3, 1, 0), BorderSizePixel = 0, ZIndex = 2, Parent = box,
-	}, { BackgroundColor3 = KIND_ROLE[kind] or "Accent" })
+	-- Tinted background is the kind indicator; the rail was redundant.
+	local accent
+	if opts.Bar == true then
+		accent = create("Frame", {
+			Name = "Accent", Size = UDim2.new(0, 3, 1, 0), BorderSizePixel = 0, ZIndex = 2, Parent = box,
+		}, { BackgroundColor3 = KIND_ROLE[kind] or "Accent" })
+	end
 	local content = create("Frame", {
 		Name = "Content", Size = UDim2.new(1, -(PAD + (dismissable and 26 or PAD)), 0, 0),
 		AutomaticSize = AY, Position = UDim2.fromOffset(PAD, PAD * 0.6), BackgroundTransparency = 1, Parent = box,
@@ -4431,7 +4440,7 @@ function Tab:AddBanner(opts)
 	function banner:SetKind(k)
 		local r = KIND_ROLE[k] or "Accent"
 		paint(box, { BackgroundColor3 = r })
-		paint(accent, { BackgroundColor3 = r })
+		if accent then paint(accent, { BackgroundColor3 = r }) end
 	end
 	function banner:Destroy() outer:Destroy() end
 	return banner
@@ -4786,23 +4795,27 @@ function Tab:AddActionRow(opts)
 		Name = "Actions", BackgroundTransparency = 1, Size = UDim2.new(1 - labelW, -PAD * 2, 1, 0),
 		Position = UDim2.new(1, -PAD, 0, 0), AnchorPoint = Vector2.new(1, 0), Parent = f,
 	}, { list(8, H, { HorizontalAlignment = Enum.HorizontalAlignment.Right, VerticalAlignment = Enum.VerticalAlignment.Center }) })
-	local buttons = {}
+	-- The enabled flag has to live in a Lua table: an Instance cannot carry
+	-- custom fields, so `b._enabled` raised "_enabled is not a valid member of
+	-- TextButton" the moment SetEnabled ran.
+	local buttons, enabled = {}, {}
 	for i, a in ipairs(opts.Actions or {}) do
 		local b = textButton(host, a.Text or "", a.Kind, i)
 		buttons[i] = b
+		enabled[i] = true
 		connect(b.MouseButton1Click, function()
-			if b._enabled == false then return end
+			if enabled[i] == false then return end
 			playSound("Click")
 			if a.Callback then a.Callback() end
 		end)
 	end
 	local el = { Buttons = buttons }
-	function el:SetEnabled(index, enabled)
+	function el:SetEnabled(index, on)
 		local b = self.Buttons[index]
 		if not b then return end
-		b._enabled = enabled and true or false
-		b.Active = enabled and true or false
-		b.TextTransparency = enabled and 0 or 0.6
+		enabled[index] = on and true or false
+		b.Active = on and true or false
+		b.TextTransparency = on and 0 or 0.6
 	end
 	return el
 end
