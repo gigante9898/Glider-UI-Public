@@ -2681,7 +2681,7 @@ function Tab:AddToggle(opts)
 	local f = row((opts and opts.Parent) or self, ROW_H)
 	local hit = create("TextButton", {Text = "", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Parent = f})
 
-	label({
+	local titleLabel = label({
 		Text = opts.Name,
 		TextTruncate = TRUNC,
 		Size = UDim2.new(1, -190, 1, 0),
@@ -2691,6 +2691,13 @@ function Tab:AddToggle(opts)
 	local _, show = capsule(f, UDim2.new(1, -PAD - 1, 0.5, 0))
 
 	attachBind(window, f, hit, el, opts.Name, UDim2.new(1, -PAD - 42, 0.5, 0), true)
+
+	-- Dynamic caption: lets a toggle rewrite its own text on state change
+	-- (e.g. "Public party, appears on browse" / "Private, code only").
+	function el:SetName(text)
+		opts.Name = text
+		pcall(function() titleLabel.Text = tostring(text) end)
+	end
 
 	function el:Set(v, silent)
 		self.Value = v
