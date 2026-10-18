@@ -658,6 +658,10 @@ local Library = {
 	Sounds = SOUNDS,
 	SoundEnabled = true,
 	RarityColors = RARITY_COLORS,
+	Components = {
+		Card = true, Banner = true, Stat = true, Chips = true, List = true,
+		ActionRow = true, CopyField = true, Prompt = true, Confirm = true,
+	},
 	Icons = {
 		Combat     = 119168694531898,
 		Player     = 127505433136549,
@@ -759,6 +763,7 @@ function Library.new(opts)
 		_pinnedCount = 0,
 		_hudEnabled = true,
 		_sidePanels = {},
+		_popups = {},
 	}, Library)
 
 	if opts.MenuKey then Library.MenuKey = opts.MenuKey end
@@ -1898,6 +1903,13 @@ function Library:SetVisible(v)
 		end
 	else
 		if self.Popup then self.Popup:Destroy(); self.Popup = nil end
+		if self._popups then
+			for i = #self._popups, 1, -1 do
+				local p = self._popups[i]
+				if p and p.Close then pcall(function() p:Close() end) end
+			end
+			table.clear(self._popups)
+		end
 		self:CloseSearchModal(true)
 		if self._sidePanels then
 			for _, sp in ipairs(self._sidePanels) do
@@ -3549,12 +3561,19 @@ function Tab:AddModelGrid(opts)
 	function el:Get() return self.Value end
 
 	function el:SetItems(newItems, silent)
+		local setidentity = setthreadidentity or (syn and syn.set_thread_identity)
+		if setidentity then pcall(setidentity, 8) end
 		items = newItems or {}
 		for _, t in pairs(tiles) do
 			if t.Button then pcall(function() t.Button:Destroy() end) end
 		end
 		table.clear(tiles)
 		table.clear(previews)
+		for _, child in ipairs(scroll:GetChildren()) do
+			if child:IsA("GuiButton") then
+				pcall(function() child:Destroy() end)
+			end
+		end
 		local cap = math.min(#items, opts.MaxTiles or 60)
 		gridGen += 1
 		local myGen = gridGen
@@ -3809,11 +3828,18 @@ function Tab:AddImageGrid(opts)
 	function el:SetClickCallback(fn) self.OnClick = fn end
 
 	function el:SetItems(newItems, silent)
+		local setidentity = setthreadidentity or (syn and syn.set_thread_identity)
+		if setidentity then pcall(setidentity, 8) end
 		items = newItems or {}
 		for _, t in pairs(tiles) do
 			if t.Button then pcall(function() t.Button:Destroy() end) end
 		end
 		table.clear(tiles)
+		for _, child in ipairs(scroll:GetChildren()) do
+			if child:IsA("GuiButton") then
+				pcall(function() child:Destroy() end)
+			end
+		end
 		local cap = math.min(#items, opts.MaxTiles or 80)
 		for i = 1, cap do
 			local okTile, errTile = pcall(function()
@@ -4091,11 +4117,18 @@ function Tab:AddIconRow(opts)
 	function el:Get() return self.Value end
 
 	function el:SetItems(newItems, silent)
+		local setidentity = setthreadidentity or (syn and syn.set_thread_identity)
+		if setidentity then pcall(setidentity, 8) end
 		items = newItems or {}
 		for _, t in pairs(tiles) do
 			if t.Button then pcall(function() t.Button:Destroy() end) end
 		end
 		table.clear(tiles)
+		for _, child in ipairs(scroll:GetChildren()) do
+			if child:IsA("GuiButton") then
+				pcall(function() child:Destroy() end)
+			end
+		end
 		for i, item in ipairs(items) do
 			local okTile, errTile = pcall(function()
 				if type(item) ~= "table" then error("bad item at index " .. tostring(i)) end
@@ -4165,6 +4198,628 @@ function Tab:AddIconRow(opts)
 
 	el:SetItems(items, true)
 	el:Set(el.Value, true)
+	return el
+end
+
+-- ---------------------------------------------------------------------------
+-- PARTY / QUEUE COMPONENTS
+-- Cards, banners, stats, chips, row lists, action rows and copy fields. They are
+-- all built from the shared builders above, so they inherit theming, connection
+-- tracking and the current section/sheet layout.
+-- ---------------------------------------------------------------------------
+
+-- A dynamic-height row on the current sheet. Unlike block(), its height follows
+-- its content, and its children are centered with PAD gutters on both sides.
+local function autoBlock(tab, gap)
+	local sec = sheetOf(tab)
+	local outer = create("Frame", {
+		Name = "AutoBlock",
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = AY,
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		LayoutOrder = #sec.Rows + 1,
+		Parent = sec.Body,
+	}, { list(gap or 8, nil, { HorizontalAlignment = Enum.HorizontalAlignment.Center }) })
+	make("Frame", {
+		Name = "Rule", Size = UDim2.new(1, -PAD * 2, 0, 1), BackgroundTransparency = 0.35,
+		BorderSizePixel = 0, LayoutOrder = 0, Visible = #sec.Rows > 0, Parent = outer,
+	}, { BackgroundColor3 = "Rule2" })
+	table.insert(sec.Rows, outer)
+	return outer
+end
+
+-- A small status pill. setChip() recolours both its outline and its text by role.
+local function statusChip(parent, order)
+	local f = make("Frame", {
+		Name = "Chip", Size = UDim2.fromOffset(0, 20), AutomaticSize = AX, BorderSizePixel = 0,
+		LayoutOrder = order or 0, Parent = parent,
+	}, { BackgroundColor3 = "Hover" }, { corner(3), padding(0, 8), stroke("Rule2", 1, 0.45) })
+	local l = label({
+		Text = "", FontFace = FONTS.BodySemi, TextSize = 10, AutomaticSize = AX,
+		Size = UDim2.fromOffset(0, 20), Role = "Text", Parent = f,
+	})
+	return { Frame = f, Text = l, Stroke = f:FindFirstChildOfClass("UIStroke") }
+end
+
+local function setChip(chip, text, role)
+	local t = tostring(text or "")
+	if chip.Text.Text ~= t then chip.Text.Text = t end
+	local r = role or "Text"
+	paint(chip.Text, { TextColor3 = r })
+	if chip.Stroke then paint(chip.Stroke, { Color = r }) end
+end
+
+local function copyToClipboard(text)
+	if setclipboard then pcall(setclipboard, text) end
+end
+
+-- A titled, rounded container. The caller parents arbitrary content into card.Body.
+function Tab:AddCard(opts)
+	opts = opts or {}
+	local accentRole = opts.Accent or "Accent"
+	local pad = opts.Padding or PAD
+	local collapsible = opts.Collapsible and true or false
+	local collapsed = opts.Collapsed and true or false
+	local headH = 40
+
+	local lane = autoBlock(self, 0)
+	local laneRule = lane:FindFirstChild("Rule")
+	if laneRule then laneRule.Visible = false end -- the card carries its own border
+
+	local card = make("Frame", {
+		Name = "Card", Size = UDim2.new(1, -PAD * 2, 0, 0), AutomaticSize = AY,
+		BorderSizePixel = 0, ClipsDescendants = true, LayoutOrder = 1, Parent = lane,
+	}, { BackgroundColor3 = "PageRaised" }, { corner(6), stroke("Rule2", 1, 0.4) })
+
+	local accent = create("Frame", {
+		Name = "Accent", Size = UDim2.new(0, 3, 1, 0), BorderSizePixel = 0, ZIndex = 2, Parent = card,
+	}, { BackgroundColor3 = accentRole })
+
+	local header = create("TextButton", {
+		Name = "Header", Text = "", AutoButtonColor = false, BackgroundTransparency = 1,
+		Active = collapsible, Size = UDim2.new(1, 0, 0, headH), Position = UDim2.fromOffset(3, 0), Parent = card,
+	})
+	local titleX = pad + (collapsible and 16 or 0)
+	local title = label({
+		Text = opts.Name or "", FontFace = FONTS.HeadingBold, TextSize = 15, Role = "Text",
+		TextTruncate = TRUNC, Size = UDim2.new(0.6, -titleX, 0, 16), Position = UDim2.fromOffset(titleX, 7), Parent = header,
+	})
+	local subLbl = label({
+		Text = opts.Sub or "", FontFace = FONTS.Italic, TextSize = 12, Role = "SubText",
+		TextTruncate = TRUNC, Size = UDim2.new(0.6, -titleX, 0, 13), Position = UDim2.fromOffset(titleX, 24),
+		Visible = opts.Sub ~= nil, Parent = header,
+	})
+	local rightHost = create("Frame", {
+		Name = "Right", BackgroundTransparency = 1, Size = UDim2.new(0.4, -pad, 0, headH),
+		Position = UDim2.new(1, -pad, 0, 0), AnchorPoint = Vector2.new(1, 0), Parent = header,
+	}, { list(8, H, { HorizontalAlignment = Enum.HorizontalAlignment.Right, VerticalAlignment = Enum.VerticalAlignment.Center }) })
+	local badge = statusChip(rightHost, -1)
+	badge.Frame.Visible = false
+	for i, action in ipairs(opts.Actions or {}) do
+		local b = textButton(rightHost, action.Text or "", action.Kind, i)
+		connect(b.MouseButton1Click, function()
+			playSound("Click")
+			if action.Callback then action.Callback() end
+		end)
+	end
+
+	local chevron
+	if collapsible then
+		chevron = label({
+			Text = "▾", FontFace = FONTS.Symbol, TextSize = 12, Role = "SubText", TextXAlignment = CENTER,
+			Size = UDim2.fromOffset(16, 18), Position = UDim2.fromOffset(0, 11), Parent = header,
+		})
+	end
+
+	local body = create("Frame", {
+		Name = "Body", Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY, BackgroundTransparency = 1,
+		Position = UDim2.fromOffset(3, headH), Parent = card,
+	}, { list(6), padding(pad, pad) })
+
+	local function setCollapsed(v)
+		collapsed = v and true or false
+		body.Visible = not collapsed
+		if chevron then tween(chevron, { Rotation = collapsed and -90 or 0 }, FAST) end
+	end
+	if collapsible then
+		connect(header.MouseButton1Click, function()
+			playSound("Click")
+			setCollapsed(not collapsed)
+		end)
+	end
+	setCollapsed(collapsed)
+
+	card.Body = body
+	function card:SetTitle(t) title.Text = tostring(t or "") end
+	function card:SetSub(t)
+		subLbl.Text = tostring(t or "")
+		subLbl.Visible = t ~= nil and t ~= ""
+	end
+	function card:SetBadge(text, role)
+		if text == nil or text == "" then badge.Frame.Visible = false return end
+		badge.Frame.Visible = true
+		setChip(badge, text, role or "Accent")
+	end
+	function card:SetAccent(role)
+		accentRole = role or "Accent"
+		paint(accent, { BackgroundColor3 = accentRole })
+	end
+	function card:Toggle() setCollapsed(not collapsed) end
+	function card:Destroy() lane:Destroy() end
+	return card
+end
+-- A compact tinted info banner for short explanations.
+function Tab:AddBanner(opts)
+	opts = opts or {}
+	local KIND_ROLE = { Info = "Accent", Success = "Success", Warning = "Warning", Danger = "Danger" }
+	local kind = opts.Kind or "Info"
+	local dismissable = opts.Dismissable and true or false
+
+	local outer = autoBlock(self, 0)
+	local box = create("Frame", {
+		Name = "Banner", Size = UDim2.new(1, -PAD * 2, 0, 0), AutomaticSize = AY,
+		BorderSizePixel = 0, ClipsDescendants = true, LayoutOrder = 1, Parent = outer,
+	}, { corner(4) })
+	paint(box, { BackgroundColor3 = KIND_ROLE[kind] or "Accent" })
+	box.BackgroundTransparency = 0.9
+	local accent = create("Frame", {
+		Name = "Accent", Size = UDim2.new(0, 3, 1, 0), BorderSizePixel = 0, ZIndex = 2, Parent = box,
+	}, { BackgroundColor3 = KIND_ROLE[kind] or "Accent" })
+	local content = create("Frame", {
+		Name = "Content", Size = UDim2.new(1, -(PAD + (dismissable and 26 or PAD)), 0, 0),
+		AutomaticSize = AY, Position = UDim2.fromOffset(PAD, PAD * 0.6), BackgroundTransparency = 1, Parent = box,
+	}, { list(3), create("UIPadding", { PaddingBottom = UDim.new(0, PAD * 0.6) }) })
+	local title = label({
+		Text = opts.Text or "", FontFace = FONTS.BodySemi, TextSize = 13, Role = "Text",
+		TextWrapped = true, AutomaticSize = AY, Size = UDim2.new(1, 0, 0, 0), Parent = content,
+	})
+	local subLbl = label({
+		Text = opts.Sub or "", FontFace = FONTS.Body, TextSize = 12, Role = "SubText",
+		TextWrapped = true, AutomaticSize = AY, Size = UDim2.new(1, 0, 0, 0),
+		Visible = opts.Sub ~= nil and opts.Sub ~= "", Parent = content,
+	})
+	local closeBtn
+	if dismissable then
+		closeBtn = make("TextButton", {
+			Text = "×", FontFace = FONTS.Body, TextSize = 18, AutoButtonColor = false, BackgroundTransparency = 1,
+			Size = UDim2.fromOffset(24, 24), Position = UDim2.new(1, -6, 0, 4), AnchorPoint = Vector2.new(1, 0), Parent = box,
+		}, { TextColor3 = "SubText" })
+		connect(closeBtn.MouseButton1Click, function()
+			playSound("Click")
+			outer:Destroy()
+		end)
+	end
+
+	local banner = {}
+	function banner:Set(text, sub)
+		title.Text = tostring(text or "")
+		if sub ~= nil then
+			subLbl.Text = tostring(sub)
+			subLbl.Visible = sub ~= ""
+		end
+	end
+	function banner:SetKind(k)
+		local r = KIND_ROLE[k] or "Accent"
+		paint(box, { BackgroundColor3 = r })
+		paint(accent, { BackgroundColor3 = r })
+	end
+	function banner:Destroy() outer:Destroy() end
+	return banner
+end
+
+-- A key/value display row, optionally copyable.
+function Tab:AddStat(opts)
+	opts = opts or {}
+	local f = row(self, ROW_H)
+	label({
+		Text = opts.Name, TextTruncate = TRUNC, Size = UDim2.new(0.5, -PAD, 1, 0),
+		Position = UDim2.fromOffset(PAD, 0), Parent = f,
+	})
+	local copyW = opts.Copy and 56 or 0
+	local value = label({
+		Text = tostring(opts.Value or ""),
+		FontFace = (opts.Mono ~= false) and FONTS.Mono or FONTS.Body,
+		Role = opts.Role or "Text", TextXAlignment = RIGHT, TextTruncate = TRUNC,
+		Size = UDim2.new(0.5, -(PAD + copyW), 1, 0),
+		Position = UDim2.new(1, -(PAD + copyW), 0, 0), AnchorPoint = Vector2.new(1, 0), Parent = f,
+	})
+	if opts.Copy then
+		local copyBtn = make("TextButton", {
+			Text = track("Copy"), FontFace = FONTS.BodySemi, TextSize = 10, AutoButtonColor = false,
+			BackgroundTransparency = 1, AutomaticSize = AX, Size = UDim2.fromOffset(0, 22),
+			Position = UDim2.new(1, -PAD, 0.5, 0), AnchorPoint = Vector2.new(1, 0.5), Parent = f,
+		}, { TextColor3 = "Accent" })
+		connect(copyBtn.MouseButton1Click, function()
+			playSound("Click")
+			copyToClipboard(value.Text)
+			copyBtn.Text = track("Copied")
+			task.delay(1.4, function() if copyBtn.Parent then copyBtn.Text = track("Copy") end end)
+		end)
+	end
+	local stat = {}
+	function stat:Set(v) value.Text = tostring(v or "") end
+	return stat
+end
+
+-- A read-only row of status chips. Frames are pooled across SetItems() calls.
+local MAX_CHIPS = 12
+
+function Tab:AddChips(opts)
+	opts = opts or {}
+	local f = block(self, ROW_H)
+	local emptyLbl = label({
+		Text = "", FontFace = FONTS.Italic, TextSize = 12, Role = "SubText",
+		Size = UDim2.new(1, -PAD * 2, 1, 0), Position = UDim2.fromOffset(PAD, 0), Parent = f,
+	})
+	local host = create("Frame", {
+		Name = "Chips", BackgroundTransparency = 1, Size = UDim2.new(1, -PAD * 2, 1, 0),
+		Position = UDim2.fromOffset(PAD, 0), Parent = f,
+	}, { list(8, H, { VerticalAlignment = Enum.VerticalAlignment.Center }) })
+	local pool = {}
+	local items = opts.Items or {}
+	local emptyText = opts.Empty or "No status."
+	local el = { Items = items }
+
+	function el:SetItems(newItems)
+		items = newItems or {}
+		for i, item in ipairs(items) do
+			if i > MAX_CHIPS then break end
+			local c = pool[i]
+			if not c then c = statusChip(host, i); pool[i] = c end
+			c.Frame.Visible = true
+			setChip(c, item.Text, item.Role)
+		end
+		for i = math.min(#items, MAX_CHIPS) + 1, #pool do pool[i].Frame.Visible = false end
+		local empty = #items == 0
+		emptyLbl.Visible = empty
+		emptyLbl.Text = empty and emptyText or ""
+	end
+	function el:SetEmpty(text)
+		emptyText = tostring(text or "")
+		self:SetItems(items)
+	end
+	function el:Clear() self:SetItems({}) end
+
+	el:SetItems(items)
+	return el
+end
+
+-- A dynamic, scrollable row list with pooled frames and per-row action buttons.
+function Tab:AddList(opts)
+	opts = opts or {}
+	local rowH = opts.RowHeight or 52
+	local areaH = opts.Height or 190
+	local maxRows = opts.MaxRows or 40
+	local searchable = opts.Search and true or false
+
+	local data = {}
+	local query = ""
+	local el = {}
+
+	local outer = autoBlock(self, 0)
+	local box = create("Frame", {
+		Name = "List", Size = UDim2.new(1, -PAD * 2, 0, 0), AutomaticSize = AY,
+		BackgroundTransparency = 1, BorderSizePixel = 0, LayoutOrder = 1, Parent = outer,
+	}, { list(6) })
+
+	if opts.Name or opts.Sub then
+		local head = create("Frame", {
+			Name = "Header", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, opts.Sub and 38 or 20), Parent = box,
+		})
+		if opts.Name then
+			label({
+				Text = opts.Name, FontFace = FONTS.HeadingBold, TextSize = 14, TextTruncate = TRUNC,
+				Size = UDim2.new(1, 0, 0, 18), Parent = head,
+			})
+		end
+		if opts.Sub then
+			label({
+				Text = opts.Sub, FontFace = FONTS.Italic, TextSize = 12, Role = "SubText", TextTruncate = TRUNC,
+				Size = UDim2.new(1, 0, 0, 14), Position = UDim2.fromOffset(0, 20), Parent = head,
+			})
+		end
+	end
+
+	local searchBox
+	if searchable then
+		local sf = create("Frame", { Name = "Search", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 30), Parent = box })
+		make("ImageLabel", {
+			Image = asset(Library.Icons.Search), BackgroundTransparency = 1, Size = UDim2.fromOffset(12, 12),
+			Position = UDim2.new(0, 3, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5), Parent = sf,
+		}, { ImageColor3 = "Accent" })
+		searchBox = make("TextBox", {
+			Text = "", PlaceholderText = "Filter…", FontFace = FONTS.Body, TextSize = 13, ClearTextOnFocus = false,
+			TextXAlignment = LEFT, BackgroundTransparency = 1,
+			Size = UDim2.new(1, -22, 0, 26), Position = UDim2.fromOffset(22, 2), Parent = sf,
+		}, { TextColor3 = "Text", PlaceholderColor3 = "SubText" })
+		italicWhenEmpty(searchBox)
+		make("Frame", {
+			Size = UDim2.new(1, 0, 0, 1), Position = UDim2.new(0, 0, 1, -1), BorderSizePixel = 0, Parent = sf,
+		}, { BackgroundColor3 = "Rule2" })
+	end
+
+	local host = create("Frame", {
+		Name = "ScrollHost", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, areaH), Parent = box,
+	})
+	local scroll = make("ScrollingFrame", {
+		Name = "Rows", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, BorderSizePixel = 0,
+		ScrollBarThickness = 2, CanvasSize = UDim2.new(), AutomaticCanvasSize = AY,
+		ScrollingDirection = Enum.ScrollingDirection.Y, Parent = host,
+	}, { ScrollBarImageColor3 = "Rule2" }, {
+		list(6),
+		create("UIPadding", { PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 8), PaddingRight = UDim.new(0, 6) }),
+	})
+	local emptyText = opts.Empty or "Nothing here yet."
+	local emptyLbl = label({
+		Text = emptyText, FontFace = FONTS.Italic, TextSize = 13, Role = "SubText",
+		TextXAlignment = CENTER, TextYAlignment = Enum.TextYAlignment.Center, TextWrapped = true,
+		Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, ZIndex = 2, Parent = host,
+	})
+
+	local pool = {}
+
+	local function actionSignature(actions)
+		local parts = {}
+		for i, a in ipairs(actions or {}) do
+			parts[i] = tostring(a.Text or "") .. "|" .. tostring(a.Kind or "")
+		end
+		return table.concat(parts, ";")
+	end
+
+	local function ensureRow(index)
+		local r = pool[index]
+		if r then return r end
+		local f = create("Frame", {
+			Name = "Row" .. index, Size = UDim2.new(1, -8, 0, rowH), BackgroundTransparency = 1,
+			BorderSizePixel = 0, LayoutOrder = index, Parent = scroll,
+		}, { corner(4) })
+		paint(f, { BackgroundColor3 = "Hover" })
+		local accent = create("Frame", {
+			Name = "Accent", Size = UDim2.new(0, 3, 1, 0), BackgroundTransparency = 1, BorderSizePixel = 0,
+			ZIndex = 2, Parent = f,
+		}, { BackgroundColor3 = "Accent" })
+		local title = label({
+			Text = "", FontFace = FONTS.BodySemi, TextSize = 13, TextTruncate = TRUNC,
+			Size = UDim2.new(0.55, -PAD, 0, 17), Position = UDim2.fromOffset(PAD, 6), Parent = f,
+		})
+		local sub = label({
+			Text = "", FontFace = FONTS.Body, TextSize = 11, Role = "SubText", TextTruncate = TRUNC,
+			Size = UDim2.new(0.55, -PAD, 0, 14), Position = UDim2.fromOffset(PAD, 24), Visible = false, Parent = f,
+		})
+		local chips = create("Frame", {
+			Name = "Chips", BackgroundTransparency = 1, Size = UDim2.new(0.55, -PAD, 0, 20),
+			Position = UDim2.fromOffset(PAD, 40), Visible = false, Parent = f,
+		}, { list(6, H, { VerticalAlignment = Enum.VerticalAlignment.Center }) })
+		local actions = create("Frame", {
+			Name = "Actions", BackgroundTransparency = 1, Size = UDim2.new(0.45, -PAD, 1, 0),
+			Position = UDim2.new(1, -PAD, 0, 0), AnchorPoint = Vector2.new(1, 0), Parent = f,
+		}, { list(6, H, { HorizontalAlignment = Enum.HorizontalAlignment.Right, VerticalAlignment = Enum.VerticalAlignment.Center }) })
+		r = { Frame = f, Accent = accent, Title = title, Sub = sub, Chips = chips, Actions = actions,
+			Buttons = {}, ChipPool = {}, Callbacks = {}, Id = nil, Selected = false, Hovered = false, Sig = false }
+		pool[index] = r
+		connect(f.MouseEnter, function()
+			r.Hovered = true
+			f.BackgroundTransparency = r.Selected and 0.85 or 0.94
+		end)
+		connect(f.MouseLeave, function()
+			r.Hovered = false
+			f.BackgroundTransparency = r.Selected and 0.92 or 1
+		end)
+		return r
+	end
+
+	local function ensureButtons(r, actions)
+		local sig = actionSignature(actions)
+		if r.Sig ~= sig then
+			for _, b in ipairs(r.Buttons) do pcall(function() b:Destroy() end) end
+			table.clear(r.Buttons)
+			for i, a in ipairs(actions or {}) do
+				if i > 3 then break end
+				local b = textButton(r.Actions, a.Text or "", a.Kind, i)
+				r.Callbacks[i] = a.Callback
+				connect(b.MouseButton1Click, function()
+					playSound("Click")
+					local cb = r.Callbacks[i]
+					if cb and r.Id ~= nil then cb(r.Id) end
+				end)
+				table.insert(r.Buttons, b)
+			end
+			r.Sig = sig
+		else
+			for i, a in ipairs(actions or {}) do r.Callbacks[i] = a.Callback end
+		end
+	end
+
+	local function applyRow(r, item)
+		r.Id = item.Id
+		local selected = item.Selected and true or false
+		r.Selected = selected
+		r.Accent.BackgroundTransparency = selected and 0 or 1
+		r.Frame.BackgroundTransparency = r.Hovered and (selected and 0.85 or 0.94) or (selected and 0.92 or 1)
+
+		local t = tostring(item.Title or "")
+		if r.Title.Text ~= t then r.Title.Text = t end
+		local s = item.Sub and tostring(item.Sub) or ""
+		if r.Sub.Text ~= s then r.Sub.Text = s end
+		r.Sub.Visible = s ~= ""
+
+		local dim = item.Dim and true or false
+		if r.Title.TextTransparency ~= (dim and 0.5 or 0) then r.Title.TextTransparency = dim and 0.5 or 0 end
+		if r.Sub.TextTransparency ~= (dim and 0.6 or 0) then r.Sub.TextTransparency = dim and 0.6 or 0 end
+
+		local chips = {}
+		if item.Badge and item.Badge.Text then
+			table.insert(chips, { Text = item.Badge.Text, Role = item.Badge.Role or "Accent" })
+		end
+		for _, c in ipairs(item.Chips or {}) do table.insert(chips, c) end
+		if #chips > 0 then
+			r.Chips.Visible = true
+			r.Frame.Size = UDim2.new(1, -8, 0, rowH + 18)
+			for i, c in ipairs(chips) do
+				local chip = r.ChipPool[i]
+				if not chip then chip = statusChip(r.Chips, i); r.ChipPool[i] = chip end
+				chip.Frame.Visible = true
+				setChip(chip, c.Text, c.Role)
+			end
+			for i = #chips + 1, #r.ChipPool do r.ChipPool[i].Frame.Visible = false end
+		else
+			r.Chips.Visible = false
+			r.Frame.Size = UDim2.new(1, -8, 0, rowH)
+		end
+
+		ensureButtons(r, item.Actions)
+	end
+
+	local function visibleItems()
+		local out = {}
+		for _, item in ipairs(data) do
+			if #out >= maxRows then break end
+			if query == "" then
+				table.insert(out, item)
+			else
+				local hay = (tostring(item.Title or "") .. " " .. tostring(item.Sub or "")):lower()
+				if string.find(hay, query, 1, true) then table.insert(out, item) end
+			end
+		end
+		return out
+	end
+
+	local function render()
+		local items = visibleItems()
+		for i, item in ipairs(items) do
+			local r = ensureRow(i)
+			r.Frame.Visible = true
+			applyRow(r, item)
+		end
+		for i = #items + 1, #pool do pool[i].Frame.Visible = false end
+		local empty = #items == 0
+		emptyLbl.Visible = empty
+		emptyLbl.Text = empty and emptyText or ""
+	end
+
+	function el:SetRows(newRows)
+		data = newRows or {}
+		render()
+	end
+	function el:SetRow(id, rowData)
+		local found = false
+		for i, item in ipairs(data) do
+			if item.Id == id then data[i] = rowData; found = true; break end
+		end
+		if not found then table.insert(data, rowData) end
+		render()
+	end
+	function el:RemoveRow(id)
+		for i = #data, 1, -1 do
+			if data[i].Id == id then table.remove(data, i) end
+		end
+		render()
+	end
+	function el:GetSelection()
+		for _, item in ipairs(data) do
+			if item.Selected then return item.Id end
+		end
+		return nil
+	end
+	function el:SetEmpty(text)
+		emptyText = tostring(text or "")
+		render()
+	end
+	function el:Clear()
+		data = {}
+		render()
+	end
+
+	if searchBox then
+		connect(searchBox:GetPropertyChangedSignal("Text"), function()
+			query = string.lower(searchBox.Text or "")
+			render()
+		end)
+	end
+
+	render()
+	return el
+end
+
+-- A single row with up to N buttons side by side.
+function Tab:AddActionRow(opts)
+	opts = opts or {}
+	local f = row(self, ROW_H)
+	local labelW = opts.Name and 0.4 or 0
+	if opts.Name then
+		label({
+			Text = opts.Name, TextTruncate = TRUNC, Size = UDim2.new(0.4, -PAD, 1, 0),
+			Position = UDim2.fromOffset(PAD, 0), Parent = f,
+		})
+	end
+	local host = create("Frame", {
+		Name = "Actions", BackgroundTransparency = 1, Size = UDim2.new(1 - labelW, -PAD * 2, 1, 0),
+		Position = UDim2.new(1, -PAD, 0, 0), AnchorPoint = Vector2.new(1, 0), Parent = f,
+	}, { list(8, H, { HorizontalAlignment = Enum.HorizontalAlignment.Right, VerticalAlignment = Enum.VerticalAlignment.Center }) })
+	local buttons = {}
+	for i, a in ipairs(opts.Actions or {}) do
+		local b = textButton(host, a.Text or "", a.Kind, i)
+		buttons[i] = b
+		connect(b.MouseButton1Click, function()
+			if b._enabled == false then return end
+			playSound("Click")
+			if a.Callback then a.Callback() end
+		end)
+	end
+	local el = { Buttons = buttons }
+	function el:SetEnabled(index, enabled)
+		local b = self.Buttons[index]
+		if not b then return end
+		b._enabled = enabled and true or false
+		b.Active = enabled and true or false
+		b.TextTransparency = enabled and 0 or 0.6
+	end
+	return el
+end
+
+-- A read-only value in a bordered box with a copy button.
+function Tab:AddCopyField(opts)
+	opts = opts or {}
+	local mono = opts.Mono ~= false
+	local value = tostring(opts.Value or "")
+
+	local outer = autoBlock(self, 0)
+	local box = create("Frame", {
+		Name = "CopyField", Size = UDim2.new(1, -PAD * 2, 0, 0), AutomaticSize = AY,
+		BackgroundTransparency = 1, BorderSizePixel = 0, LayoutOrder = 1, Parent = outer,
+	}, { list(5) })
+	if opts.Name then
+		label({
+			Text = opts.Name, FontFace = FONTS.BodySemi, TextSize = 12, Role = "SubText",
+			TextTruncate = TRUNC, Size = UDim2.new(1, 0, 0, 14), Parent = box,
+		})
+	end
+	local field = create("Frame", {
+		Name = "Field", Size = UDim2.new(1, 0, 0, 34), BorderSizePixel = 0, Parent = box,
+	}, { corner(4), stroke("Rule2", 1, 0.4) })
+	paint(field, { BackgroundColor3 = "PageBg" })
+	local valLbl = label({
+		Text = value, FontFace = mono and FONTS.Mono or FONTS.Body, TextSize = 13, Role = "Text",
+		TextTruncate = TRUNC, Size = UDim2.new(1, -100, 0, 34), Position = UDim2.fromOffset(12, 0), Parent = field,
+	})
+	local copyBtn = textButton(field, opts.Button or "Copy", "primary")
+	copyBtn.AnchorPoint = Vector2.new(1, 0.5)
+	copyBtn.Position = UDim2.new(1, -6, 0.5, 0)
+	copyBtn.Size = UDim2.fromOffset(0, 24)
+	connect(copyBtn.MouseButton1Click, function()
+		playSound("Click")
+		copyToClipboard(valLbl.Text)
+		copyBtn.Text = track("Copied")
+		task.delay(1.4, function() if copyBtn.Parent then copyBtn.Text = track(opts.Button or "Copy") end end)
+	end)
+
+	local el = { Value = value }
+	function el:Set(v)
+		self.Value = tostring(v or "")
+		valLbl.Text = self.Value
+	end
+	function el:Get() return self.Value end
 	return el
 end
 
@@ -4309,6 +4964,150 @@ function Library:_openBindPopup(el, name)
 	unbind.MouseButton1Click:Connect(function() bind.Key = nil; commit(); close() end)
 	done.MouseButton1Click:Connect(close)
 	overlay.MouseButton1Click:Connect(close)
+end
+
+-- ---------------------------------------------------------------------------
+-- MODAL DIALOGS
+-- Prompt/Confirm share the bind popup's backdrop + centred box. Every open modal
+-- is tracked in self._popups so SetVisible(false) (and Unload) closes them too.
+-- ---------------------------------------------------------------------------
+local DIALOG_ROLE = {Info = "Accent", Success = "Success", Warning = "Warning", Danger = "Danger"}
+
+function Library:Prompt(opts)
+	opts = opts or {}
+	local kind = opts.Kind or "Info"
+	local role = DIALOG_ROLE[kind] or "Accent"
+	local dismissable = opts.Dismissable ~= false
+	local buttons = opts.Buttons or {{Text = "OK", Kind = "primary"}}
+
+	local overlay = create("TextButton", {
+		Name = "Prompt", Text = "", AutoButtonColor = false, Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 1,
+		ZIndex = 20, Parent = self.Main,
+	}, {corner(6)})
+	tween(overlay, {BackgroundTransparency = 0.5})
+
+	local box = make("Frame", {
+		Active = true, Size = UDim2.fromOffset(opts.Width or 300, 0), AutomaticSize = AY,
+		Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5),
+		BorderSizePixel = 0, ZIndex = 21, Parent = overlay,
+	}, {BackgroundColor3 = "PageRaised"}, {
+		corner(6), stroke("Rule2"),
+		create("UIPadding", {
+			PaddingTop = UDim.new(0, 18), PaddingBottom = UDim.new(0, 18),
+			PaddingLeft = UDim.new(0, 20), PaddingRight = UDim.new(0, 20),
+		}),
+		list(10),
+	})
+	local scale = create("UIScale", {Scale = 0.96, Parent = box})
+	tween(scale, {Scale = 1}, FAST)
+	playSound("Popup")
+
+	local head = create("Frame", {
+		Name = "Head", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 22), LayoutOrder = 1, Parent = box,
+	})
+	local accent = make("Frame", {
+		Name = "Accent", Size = UDim2.new(0, 3, 1, 0), BorderSizePixel = 0, Parent = head,
+	}, {BackgroundColor3 = role})
+	local title = label({
+		Text = tostring(opts.Title or ""), FontFace = FONTS.HeadingBold, TextSize = 16, TextTruncate = TRUNC,
+		Size = UDim2.new(1, -(dismissable and 24 or 0) - 11, 1, 0), Position = UDim2.fromOffset(11, 0), Parent = head,
+	})
+	make("Frame", {Size = UDim2.new(1, 0, 0, 1), BorderSizePixel = 0, LayoutOrder = 2, Parent = box}, {BackgroundColor3 = "Rule2"})
+
+	local body = create("Frame", {
+		Name = "Body", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY,
+		LayoutOrder = 3, Parent = box,
+	}, {list(8)})
+	local bodyLbl = label({
+		Text = tostring(opts.Body or ""), TextSize = 13, Role = "SubText", TextWrapped = true,
+		TextYAlignment = Enum.TextYAlignment.Top, AutomaticSize = AY, Size = UDim2.new(1, 0, 0, 0),
+		LayoutOrder = 0, Visible = opts.Body ~= nil and opts.Body ~= "", Parent = body,
+	})
+
+	local prompt = {Body = body, Closed = false}
+
+	local footer = create("Frame", {
+		Name = "Footer", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 32), LayoutOrder = 5, Parent = box,
+	}, {list(8, H, {HorizontalAlignment = Enum.HorizontalAlignment.Right, VerticalAlignment = Enum.VerticalAlignment.Center})})
+
+	local function close()
+		if prompt.Closed then return end
+		prompt.Closed = true
+		if self._popups then
+			for i = #self._popups, 1, -1 do
+				if self._popups[i] == prompt then table.remove(self._popups, i) end
+			end
+		end
+		if prompt.Cleanup then pcall(prompt.Cleanup) end
+		tween(scale, {Scale = 0.96})
+		local out = tween(overlay, {BackgroundTransparency = 1})
+		if out then out.Completed:Wait() end
+		overlay:Destroy()
+	end
+
+	prompt.Close = close
+	prompt.SetTitle = function(_, t) title.Text = tostring(t or "") end
+	prompt.SetBody = function(_, t)
+		bodyLbl.Text = tostring(t or "")
+		bodyLbl.Visible = t ~= nil and t ~= ""
+	end
+
+	if opts.Content then
+		prompt.Cleanup = opts.Content(body)
+	end
+
+	for i, btn in ipairs(buttons) do
+		local b = textButton(footer, btn.Text or "", btn.Kind, i)
+		connect(b.MouseButton1Click, function()
+			playSound("Click")
+			if btn.Callback then pcall(btn.Callback) end
+			close()
+		end)
+	end
+
+	if dismissable then
+		local closeBtn = make("TextButton", {
+			Name = "Close", Text = "×", FontFace = FONTS.Body, TextSize = 18, AutoButtonColor = false,
+			BackgroundTransparency = 1, Size = UDim2.fromOffset(22, 22),
+			Position = UDim2.new(1, 0, 0, 0), AnchorPoint = Vector2.new(1, 0), Parent = head,
+		}, {TextColor3 = "SubText"})
+		connect(closeBtn.MouseButton1Click, function() playSound("Click"); close() end)
+		connect(overlay.MouseButton1Click, function() playSound("Click"); close() end)
+	end
+
+	self._popups = self._popups or {}
+	table.insert(self._popups, prompt)
+
+	if type(opts.Timeout) == "number" and opts.Timeout > 0 then
+		task.delay(opts.Timeout, function()
+			if prompt.Closed then return end
+			if opts.OnTimeout then pcall(opts.OnTimeout) end
+			close()
+		end)
+	end
+
+	return prompt
+end
+
+function Library:Confirm(opts)
+	opts = opts or {}
+	local kind = opts.Kind or "Danger"
+	return self:Prompt({
+		Title = opts.Title,
+		Body = opts.Body,
+		Kind = kind,
+		Width = opts.Width,
+		Dismissable = opts.Dismissable,
+		Buttons = {
+			{Text = opts.CancelText or "Cancel", Callback = function()
+				if opts.OnCancel then opts.OnCancel() end
+			end},
+			{Text = opts.ConfirmText or "Confirm", Kind = kind == "Danger" and "danger" or "primary", Callback = function()
+				if opts.OnConfirm then opts.OnConfirm() end
+			end},
+		},
+	})
 end
 
 -- ---------------------------------------------------------------------------
@@ -5083,7 +5882,11 @@ function Library:CreateSidePanel(title, opts)
 		return {
 			Row = row, TitleLabel = tLbl, ActionButton = actionBtn,
 			SetAction = function(txt, cb)
-				if actionBtn and txt then actionBtn.Text = tostring(txt) end
+				local setidentity = setthreadidentity or (syn and syn.set_thread_identity)
+				if setidentity then pcall(setidentity, 8) end
+				pcall(function()
+					if actionBtn and txt then actionBtn.Text = tostring(txt) end
+				end)
 				if cb then actionCallback = cb end
 			end,
 		}
@@ -5173,6 +5976,8 @@ function Library:CreateSidePanel(title, opts)
 
 		local gridGen = 0
 		function gridObj:SetItems(items)
+			local setidentity = setthreadidentity or (syn and syn.set_thread_identity)
+			if setidentity then pcall(setidentity, 8) end
 			items = items or {}
 			gridGen = gridGen + 1
 			local myGen = gridGen
@@ -5184,6 +5989,11 @@ function Library:CreateSidePanel(title, opts)
 				if t.Button then pcall(function() t.Button:Destroy() end) end
 			end
 			table.clear(tiles)
+			for _, child in ipairs(scroll:GetChildren()) do
+				if child:IsA("GuiButton") then
+					pcall(function() child:Destroy() end)
+				end
+			end
 
 			for i, item in ipairs(items) do
 				local id = tostring(item.Id or item.Name or ("wrap" .. i))
