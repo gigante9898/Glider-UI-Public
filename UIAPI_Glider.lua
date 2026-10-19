@@ -5463,7 +5463,7 @@ function Library:AddDiscordTab(name, icon)
 		Name = "Discord Server",
 		Callback = function()
 			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
-			if clipFn then pcall(clipFn, "https://discord.gg/dJ5yNFZYmX") end
+			if clipFn then pcall(clipFn, "https://discord.gg/Z3vCpEPevt") end
 			self:Notify({Title = "Discord Server", Body = "Copied to clipboard!", Type = "Success"})
 		end,
 	})
