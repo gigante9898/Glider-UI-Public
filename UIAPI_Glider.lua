@@ -21,25 +21,7 @@ end
 local Players         = game:GetService("Players")
 local UIS             = game:GetService("UserInputService")
 local TweenService    = game:GetService("TweenService")
--- Some executors block GetService("HttpService") for loaded chunks (the call
--- itself can fail), so grab it lazily: without it only JSON config
--- persistence degrades, the UI itself keeps working.
-local HttpService     = nil
-pcall(function() HttpService = game:GetService("HttpService") end)
-local function jsonEncode(tbl)
-	if HttpService then
-		local ok, raw = pcall(HttpService.JSONEncode, HttpService, tbl)
-		if ok and type(raw) == "string" then return raw end
-	end
-	return nil
-end
-local function jsonDecode(raw)
-	if HttpService and type(raw) == "string" and raw ~= "" then
-		local ok, decoded = pcall(HttpService.JSONDecode, HttpService, raw)
-		if ok then return decoded end
-	end
-	return nil
-end
+local HttpService     = game:GetService("HttpService")
 local RunService      = game:GetService("RunService")
 local SoundService    = game:GetService("SoundService")
 local StatsService    = game:GetService("Stats")
@@ -516,8 +498,7 @@ function Storage.list()
 	return names
 end
 function Storage.save(name, tbl)
-	local raw = jsonEncode(tbl)
-	if not raw then Storage._mem[safeName(name)] = tbl return end
+	local raw = HttpService:JSONEncode(tbl)
 	if HAS_FS then pcall(writefile, configPath(name), raw) else Storage._mem[safeName(name)] = raw end
 end
 function Storage.load(name)
@@ -529,8 +510,8 @@ function Storage.load(name)
 		raw = Storage._mem[safeName(name)]
 	end
 	if not raw then return nil end
-	if type(raw) == "table" then return raw end
-	return jsonDecode(raw)
+	local ok, decoded = pcall(HttpService.JSONDecode, HttpService, raw)
+	return ok and decoded or nil
 end
 function Storage.delete(name)
 	if HAS_FS then pcall(function() if isfile(configPath(name)) then delfile(configPath(name)) end end)
@@ -627,8 +608,7 @@ function Storage.saveKeyHUD(on) writeGlobal("keyhud.txt", on and "1" or "0") end
 function Storage.loadKeyHUD() return loadBit("keyhud.txt") end
 function Storage.saveWindowSize(w, h)
 	if type(w) == "number" and type(h) == "number" then
-		local data = jsonEncode({ Width = math.floor(w), Height = math.floor(h) })
-		if not data then return end
+		local data = HttpService:JSONEncode({ Width = math.floor(w), Height = math.floor(h) })
 		writeGlobal("window_size.json", data)
 		if HAS_FS then
 			pcall(function()
@@ -648,7 +628,7 @@ function Storage.loadWindowSize()
 	end
 	if not raw then raw = readGlobal("window_size.json") end
 	if raw and raw ~= "" then
-		local data = jsonDecode(raw)
+		local ok, data = pcall(function() return HttpService:JSONDecode(raw) end)
 		if type(data) == "table" and type(data.Width) == "number" and type(data.Height) == "number" then
 			return data
 		end
