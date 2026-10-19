@@ -2654,6 +2654,7 @@ function Tab:AddMarkdown(md, opts)
 		for _, f in ipairs(rows) do f:Destroy() end
 		rows = {}
 		for line in tostring(text):gsub("\r", ""):gmatch("([^\n]*)\n?") do
+			line = line:match("^%s*(.-)%s*$") or "" -- heredocs come indented; parse the content
 			local h1 = line:match("^#%s+(.+)")
 			local h2 = line:match("^##%s+(.+)")
 			local h3 = line:match("^###%s+(.+)")
