@@ -6004,10 +6004,10 @@ function Library:CreateSidePanel(title, opts)
 	end
 
 	-- Minimalist Search Input
-	function panel:AddSearch(placeholder, callback)
+	function panel:AddSearch(placeholder, callback, order)
 		local box = make("Frame", {
 			Name = "SearchBox", Size = UDim2.new(1, 0, 0, 28),
-			BackgroundTransparency = 0.5, BorderSizePixel = 0, LayoutOrder = 5,
+			BackgroundTransparency = 0.5, BorderSizePixel = 0, LayoutOrder = order or 5,
 			Parent = content,
 		}, { BackgroundColor3 = "PageRaised" }, { corner(4), stroke("Rule2", 1, 0.4) })
 
@@ -6287,6 +6287,7 @@ function Library:CreateSidePanel(title, opts)
 		local b = make("TextButton", {
 			Name = "SideButton", Size = UDim2.new(1, 0, 0, 32),
 			AutoButtonColor = false, BackgroundTransparency = 0.5,
+			LayoutOrder = btnOpts.Order or 0,
 			Text = btnOpts.Name or "Button", FontFace = FONTS.BodySemi, TextSize = 12,
 			Parent = content,
 		}, { BackgroundColor3 = "PageRaised", TextColor3 = "Text" }, { corner(6), stroke("Rule2", 1, 0.4) })
@@ -6446,17 +6447,18 @@ function Library:CreateSidePanel(title, opts)
 		buildButtons(actions)
 		return api
 	end
-	function panel:AddRowGroup()
+	function panel:AddRowGroup(order)
 		local g = make("Frame", {
 			Name = "SideRows", Size = UDim2.new(1, 0, 0, 0),
 			BackgroundTransparency = 1, BorderSizePixel = 0, AutomaticSize = AY,
-			Parent = content,
+		LayoutOrder = order or 0, Parent = content,
 		}, nil, { list(6) })
 		return g
 	end
-	function panel:AddSection(text)
+	function panel:AddSection(text, order)
 		local sec = make("Frame", {
 			Name = "SideSection", Size = UDim2.new(1, 0, 0, 24),
+			LayoutOrder = order or 0,
 			BackgroundTransparency = 1, Parent = content,
 		})
 		label({
