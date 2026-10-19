@@ -2599,6 +2599,81 @@ function Tab:AddLabel(text, opts)
 	}
 end
 
+-- Markdown docs: headings, bold/italic/code, bullets, quotes, dividers.
+-- One call renders a whole guide/changelog page; Set() rebuilds it.
+function Tab:AddMarkdown(md, opts)
+	opts = opts or {}
+	local host = (opts and opts.Parent) or self
+	local rows = {}
+	local function mdInline(s)
+		s = escapeRich(s)
+		s = s:gsub("%*%*(.-)%*%*", "<b>%1</b>")
+		s = s:gsub("%*(.-)%*", "<i>%1</i>")
+		s = s:gsub("`(.-)`", '<font color="' .. toHex(CURRENT_THEME.Accent) .. '">%1</font>')
+		return s
+	end
+	local function mdRow(rich, font, size, role, indent)
+		local f = row(host, ROW_H)
+		local l = label({
+			Text = rich,
+			RichText = true,
+			TextWrapped = true,
+			TextYAlignment = Enum.TextYAlignment.Top,
+			FontFace = font or FONTS.Body,
+			TextSize = size or 13,
+			AutomaticSize = AY,
+			Size = UDim2.new(1, -(indent or PAD), 0, 0),
+			Position = UDim2.fromOffset(indent or PAD, 12),
+			Parent = f,
+			Role = role or "Text",
+		})
+		local function fit()
+			local textH = l.AbsoluteSize.Y / self.Window:_uiScale()
+			f.Size = UDim2.new(1, 0, 0, math.max(ROW_H, math.ceil(textH) + 24))
+		end
+		l:GetPropertyChangedSignal("AbsoluteSize"):Connect(fit)
+		fit()
+		rows[#rows + 1] = f
+		return f
+	end
+	local function mdDivider()
+		local f = row(host, 14)
+		make("Frame", {
+			Size = UDim2.new(1, -PAD * 2, 0, 1), Position = UDim2.fromOffset(PAD, 6),
+			BorderSizePixel = 0, Parent = f,
+		}, { BackgroundColor3 = "Rule2" })
+		rows[#rows + 1] = f
+	end
+	local function render(text)
+		for _, f in ipairs(rows) do f:Destroy() end
+		rows = {}
+		for line in tostring(text):gsub("\r", ""):gmatch("([^\n]*)\n?") do
+			local h1 = line:match("^#%s+(.+)")
+			local h2 = line:match("^##%s+(.+)")
+			local h3 = line:match("^###%s+(.+)")
+			local bullet = line:match("^[%-%*]%s+(.+)")
+			local quote = line:match("^>%s+(.+)")
+			if line:match("^%s*%-%-%-%s*$") then
+				mdDivider()
+			elseif h1 then
+				mdRow(mdInline(h1), FONTS.HeadingBold, 18, "Text", PAD)
+			elseif h2 then
+				mdRow(mdInline(h2), FONTS.HeadingBold, 15, "Text", PAD)
+			elseif h3 then
+				mdRow(mdInline(h3), FONTS.BodySemi, 13, "Accent", PAD)
+			elseif bullet then
+				mdRow("•  " .. mdInline(bullet), FONTS.Body, 13, "Text", PAD + 14)
+			elseif quote then
+				mdRow(mdInline(quote), FONTS.Italic, 13, "SubText", PAD + 14)
+			elseif line:match("%S") then
+				mdRow(mdInline(line), FONTS.Body, 13, "Text", PAD)
+			end
+		end
+	end
+	render(md)
+	return { Set = function(_, t) render(t) end }
+end
+
 -- A stronger full-width rule inside the current sheet.
 function Tab:AddDivider(opts)
 	local div = block((opts and opts.Parent) or self, 13)
