@@ -5494,26 +5494,33 @@ function Library:CreateSidePanel(title, opts)
 	if type(title) == "table" then opts = title; title = opts.Title end
 	opts = opts or {}
 	title = title or opts.Title or "Preview"
+	-- Called as Library:CreateSidePanel, self is the Library module, but
+	-- Main/Gui live on the window instance: resolve it explicitly so the
+	-- panel anchors to a real window either way.
+	local host = (self and self.Main) and self or Library._window
+	if not host or not host.Main or not host.Gui then
+		error("CreateSidePanel needs a window: call it after Library.new()")
+	end
 	local baseWidth = opts.Width or 300
 	local gap = opts.Gap or 12
 
 	local panel = {
 		Title = title,
 		IsOpen = opts.Default == true or false,
-		WindowVisible = self.Visible ~= false,
+		WindowVisible = host.Visible ~= false,
 		_connections = {},
 	}
 
 	-- Root frame parented to ScreenGui (never clipped by MainWindow)
 	local frame = make("Frame", {
 		Name = "SidePanel",
-		Size = UDim2.fromOffset(baseWidth, self.Main.Size.Y.Offset),
+		Size = UDim2.fromOffset(baseWidth, host.Main.Size.Y.Offset),
 		AnchorPoint = Vector2.new(0, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
 		Visible = false,
-		Parent = self.Gui,
+		Parent = host.Gui,
 	}, { BackgroundColor3 = "PageBg" }, { corner(6), stroke("Edge") })
 	panel.Frame = frame
 
@@ -5562,7 +5569,7 @@ function Library:CreateSidePanel(title, opts)
 	end)
 
 	-- Header drag moves the whole window + side panel together!
-	makeDraggable(self.Main, head)
+	makeDraggable(host.Main, head)
 
 	-- Content scrolling container
 	local content = create("ScrollingFrame", {
@@ -5573,7 +5580,7 @@ function Library:CreateSidePanel(title, opts)
 	}, { list(8), padding(10, 12) })
 	panel.Content = content
 
-	-- Real-time position tracking relative to self.Main, with auto-fit: on a
+	-- Real-time position tracking relative to host.Main, with auto-fit: on a
 	-- narrow viewport the panel shrinks instead of hanging off-screen, and
 	-- when not even a slim panel fits it docks to the right screen edge as an
 	-- overlay without shifting Main.
@@ -5581,14 +5588,14 @@ function Library:CreateSidePanel(title, opts)
 		return math.floor(((panel._width or baseWidth) + gap) / 2)
 	end
 	local function updatePos()
-		if not frame or not self.Main then return end
-		local mainPos = self.Main.Position
-		local mainSize = self.Main.Size
-		local anchorX = self.Main.AnchorPoint.X
+		if not frame or not host.Main then return end
+		local mainPos = host.Main.Position
+		local mainSize = host.Main.Size
+		local anchorX = host.Main.AnchorPoint.X
 		local w, overlay = baseWidth, false
 		pcall(function()
-			local viewW = self.Gui.AbsoluteSize.X
-			local mainW = self.Main.AbsoluteSize.X
+			local viewW = host.Gui.AbsoluteSize.X
+			local mainW = host.Main.AbsoluteSize.X
 			local side = math.floor((viewW - mainW) / 2 - gap - 8)
 			if side >= 200 then
 				w = math.min(baseWidth, side)
@@ -5622,10 +5629,10 @@ function Library:CreateSidePanel(title, opts)
 			end
 		end
 	end
-	table.insert(panel._connections, self.Main:GetPropertyChangedSignal("Position"):Connect(updatePos))
-	table.insert(panel._connections, self.Main:GetPropertyChangedSignal("Size"):Connect(updatePos))
-	if self.Gui then
-		table.insert(panel._connections, self.Gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(updatePos))
+	table.insert(panel._connections, host.Main:GetPropertyChangedSignal("Position"):Connect(updatePos))
+	table.insert(panel._connections, host.Main:GetPropertyChangedSignal("Size"):Connect(updatePos))
+	if host.Gui then
+		table.insert(panel._connections, host.Gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(updatePos))
 	end
 	updatePos()
 
