@@ -5494,7 +5494,7 @@ function Library:CreateSidePanel(title, opts)
 	if type(title) == "table" then opts = title; title = opts.Title end
 	opts = opts or {}
 	title = title or opts.Title or "Preview"
-	local width = opts.Width or 300
+	local baseWidth = opts.Width or 300
 	local gap = opts.Gap or 12
 
 	local panel = {
@@ -5507,7 +5507,7 @@ function Library:CreateSidePanel(title, opts)
 	-- Root frame parented to ScreenGui (never clipped by MainWindow)
 	local frame = make("Frame", {
 		Name = "SidePanel",
-		Size = UDim2.fromOffset(width, self.Main.Size.Y.Offset),
+		Size = UDim2.fromOffset(baseWidth, self.Main.Size.Y.Offset),
 		AnchorPoint = Vector2.new(0, 0.5),
 		Position = UDim2.fromScale(0.5, 0.5),
 		BorderSizePixel = 0,
@@ -5573,25 +5573,67 @@ function Library:CreateSidePanel(title, opts)
 	}, { list(8), padding(10, 12) })
 	panel.Content = content
 
-	-- Real-time position tracking relative to self.Main
+	-- Real-time position tracking relative to self.Main, with auto-fit: on a
+	-- narrow viewport the panel shrinks instead of hanging off-screen, and
+	-- when not even a slim panel fits it docks to the right screen edge as an
+	-- overlay without shifting Main.
+	local function panelShift()
+		return math.floor(((panel._width or baseWidth) + gap) / 2)
+	end
 	local function updatePos()
 		if not frame or not self.Main then return end
 		local mainPos = self.Main.Position
 		local mainSize = self.Main.Size
 		local anchorX = self.Main.AnchorPoint.X
-		local xOffset = (mainSize.X.Offset * (1 - anchorX)) + gap
-		frame.Position = UDim2.new(
-			mainPos.X.Scale, mainPos.X.Offset + xOffset,
-			mainPos.Y.Scale, mainPos.Y.Offset
-		)
-		frame.Size = UDim2.fromOffset(width, mainSize.Y.Offset)
+		local w, overlay = baseWidth, false
+		pcall(function()
+			local viewW = self.Gui.AbsoluteSize.X
+			local mainW = self.Main.AbsoluteSize.X
+			local side = math.floor((viewW - mainW) / 2 - gap - 8)
+			if side >= 200 then
+				w = math.min(baseWidth, side)
+			else
+				overlay = true
+				w = math.min(baseWidth, math.max(220, viewW - 32))
+			end
+		end)
+		panel._width = w
+		panel._overlay = overlay
+		if overlay then
+			frame.AnchorPoint = Vector2.new(1, 0.5)
+			frame.Position = UDim2.new(1, -8, 0.5, 0)
+		else
+			frame.AnchorPoint = Vector2.new(0, 0.5)
+			local xOffset = (mainSize.X.Offset * (1 - anchorX)) + gap
+			frame.Position = UDim2.new(
+				mainPos.X.Scale, mainPos.X.Offset + xOffset,
+				mainPos.Y.Scale, mainPos.Y.Offset
+			)
+		end
+		frame.Size = UDim2.fromOffset(w, mainSize.Y.Offset)
+		-- Space ran out while open: hand Main its position back.
+		if overlay and panel._isShifted then
+			local lib = panel.Library or Library._window
+			if lib and lib.Main and panel._origMainPos then
+				panel._isShifted = false
+				local orig = panel._origMainPos
+				panel._origMainPos = nil
+				pcall(function() lib.Main.Position = orig end)
+			end
+		end
 	end
 	table.insert(panel._connections, self.Main:GetPropertyChangedSignal("Position"):Connect(updatePos))
 	table.insert(panel._connections, self.Main:GetPropertyChangedSignal("Size"):Connect(updatePos))
+	if self.Gui then
+		table.insert(panel._connections, self.Gui:GetPropertyChangedSignal("AbsoluteSize"):Connect(updatePos))
+	end
 	updatePos()
 
 	-- Methods
-	local shiftX = math.floor((width + gap) / 2)
+	function panel:SetWidth(w)
+		baseWidth = math.max(200, tonumber(w) or baseWidth)
+		updatePos()
+	end
 	panel.BoundTab = opts and opts.Tab
 	panel.Library = self
 
@@ -5609,11 +5651,11 @@ function Library:CreateSidePanel(title, opts)
 			return
 		end
 		panel.IsOpen = true
-		if lib and lib.Main and not panel._isShifted then
+		if lib and lib.Main and not panel._isShifted and not panel._overlay then
 			panel._isShifted = true
 			panel._origMainPos = lib.Main.Position
 			local orig = panel._origMainPos
-			local target = UDim2.new(orig.X.Scale, orig.X.Offset - shiftX, orig.Y.Scale, orig.Y.Offset)
+			local target = UDim2.new(orig.X.Scale, orig.X.Offset - panelShift(), orig.Y.Scale, orig.Y.Offset)
 			tween(lib.Main, { Position = target }, SLIDE)
 		end
 		updatePos()
@@ -6275,8 +6317,27 @@ function Library:CreateSidePanel(title, opts)
 			Position = UDim2.fromOffset(8, 0),
 			Parent = f,
 		})
+		local titleLabel = f:FindFirstChildOfClass("TextLabel")
 
 		local _, show = capsule(f, UDim2.new(1, -8, 0.5, 0))
+
+		-- Same animated caption as Tab:AddToggle:SetName.
+		function el:SetName(text)
+			toggleOpts.Name = text
+			text = tostring(text)
+			local token = (el._nameToken or 0) + 1
+			el._nameToken = token
+			task.spawn(function()
+				local same = false
+				pcall(function() same = (titleLabel and titleLabel.Text == text) end)
+				if same then return end
+				local tw = titleLabel and tween(titleLabel, { TextTransparency = 1 }, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
+				if tw then pcall(function() tw.Completed:Wait() end) else task.wait(0.1) end
+				if el._nameToken ~= token then return end
+				pcall(function() titleLabel.Text = text end)
+				if titleLabel then tween(titleLabel, { TextTransparency = 0 }, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)) end
+			end)
+		end
 
 		function el:Set(v, silent)
 			self.Value = v
@@ -6295,7 +6356,88 @@ function Library:CreateSidePanel(title, opts)
 		return el
 	end
 
-	-- Simple Side Section
+	-- Member/row list: color dot + title + sub + up to 3 small action buttons.
+	-- The menu diffs rows by id (see party side panel): Set refreshes in
+	-- place, Destroy removes. Returns nil when content is gone.
+	function panel:AddListRow(rowOpts)
+		rowOpts = rowOpts or {}
+		local actions = {}
+		if type(rowOpts.Actions) == "table" then actions = rowOpts.Actions end
+		while #actions > 3 do table.remove(actions) end
+		local h = math.max(rowOpts.Height or 46, 12 + math.max(#actions, 1) * 22)
+		local row = make("Frame", {
+			Name = "SideRow", Size = UDim2.new(1, 0, 0, h),
+			BackgroundTransparency = 0.5, BorderSizePixel = 0,
+			Parent = content,
+		}, { BackgroundColor3 = "PageRaised" }, { corner(6), stroke("Rule2", 1, 0.4) })
+		if not row or not row.Parent then return nil end
+		local dot = make("Frame", {
+			Name = "Dot", Size = UDim2.fromOffset(8, 8),
+			Position = UDim2.new(0, 10, 0, 10), BorderSizePixel = 0,
+			BackgroundColor3 = Color3.fromRGB(140, 140, 150),
+			Parent = row,
+		}, nil, { corner(4) })
+		local titleLbl = label({
+			Text = tostring(rowOpts.Title or ""), FontFace = FONTS.BodySemi, TextSize = 12,
+			Role = "Text", TextTruncate = TRUNC,
+			Size = UDim2.new(1, -96, 0, 17), Position = UDim2.fromOffset(26, 5),
+			Parent = row,
+		})
+		local subLbl = label({
+			Text = tostring(rowOpts.Sub or ""), FontFace = FONTS.Body, TextSize = 10,
+			Role = "SubText", TextTruncate = TRUNC,
+			Size = UDim2.new(1, -96, 0, 14), Position = UDim2.fromOffset(26, 23),
+			Parent = row,
+		})
+		local btnCol = create("Frame", {
+			Name = "Actions", BackgroundTransparency = 1, BorderSizePixel = 0,
+			AnchorPoint = Vector2.new(1, 0), Position = UDim2.new(1, -6, 0, 6),
+			Size = UDim2.new(0, 64, 1, -12),
+			Parent = row,
+		}, { list(4) })
+		local api = { Row = row }
+		local function paintDot(color)
+			local c = color
+			if type(c) == "string" then c = fromHex(c) end
+			if typeof(c) == "Color3" then
+				pcall(function() dot.BackgroundColor3 = c end)
+			end
+		end
+		local function buildButtons(list)
+			for _, c in ipairs(btnCol:GetChildren()) do
+				if c:IsA("TextButton") then pcall(function() c:Destroy() end) end
+			end
+			for _, a in ipairs(list) do
+				local b = make("TextButton", {
+					Text = tostring(a.Text or "..."), FontFace = FONTS.BodySemi, TextSize = 10,
+				AutoButtonColor = false, BackgroundTransparency = 0.5,
+				Size = UDim2.fromOffset(64, 20),
+				Parent = btnCol,
+				}, { BackgroundColor3 = (a.Kind == "danger" and "Danger" or (a.Kind == "primary" and "Accent" or "ChromeBg")), TextColor3 = (a.Kind == "danger" or a.Kind == "primary") and "Text" or "SubText" }, { corner(4) })
+				b.MouseEnter:Connect(function() tween(b, { BackgroundTransparency = 0.25 }) end)
+				b.MouseLeave:Connect(function() tween(b, { BackgroundTransparency = 0.5 }) end)
+				local cb = a.Callback
+				b.MouseButton1Click:Connect(function()
+					playSound("Click")
+					if cb then cb() end
+				end)
+			end
+		end
+		function api:Set(data)
+			data = data or {}
+			if not row.Parent then return end
+			if data.Title then pcall(function() titleLbl.Text = tostring(data.Title) end) end
+			if data.Sub then pcall(function() subLbl.Text = tostring(data.Sub) end) end
+			if data.Color then paintDot(data.Color) end
+			if data.Actions then buildButtons(data.Actions) end
+		end
+		function api:Destroy()
+			pcall(function() row:Destroy() end)
+		end
+		paintDot(rowOpts.Color)
+		buildButtons(actions)
+		return api
+	end
 	function panel:AddSection(text)
 		local sec = make("Frame", {
 			Name = "SideSection", Size = UDim2.new(1, 0, 0, 24),
