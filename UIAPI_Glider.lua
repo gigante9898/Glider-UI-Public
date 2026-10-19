@@ -2612,8 +2612,13 @@ function Tab:AddMarkdown(md, opts)
 		s = s:gsub("`(.-)`", '<font color="' .. toHex(CURRENT_THEME.Accent) .. '">%1</font>')
 		return s
 	end
+	local function noRule(f)
+		local r = f:FindFirstChild("Rule")
+		if r then r.Visible = false end
+	end
 	local function mdRow(rich, font, size, role, indent)
 		local f = row(host, ROW_H)
+		noRule(f)
 		local l = label({
 			Text = rich,
 			RichText = true,
@@ -2638,6 +2643,7 @@ function Tab:AddMarkdown(md, opts)
 	end
 	local function mdDivider()
 		local f = row(host, 14)
+		noRule(f)
 		make("Frame", {
 			Size = UDim2.new(1, -PAD * 2, 0, 1), Position = UDim2.fromOffset(PAD, 6),
 			BorderSizePixel = 0, Parent = f,
