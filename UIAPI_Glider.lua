@@ -6368,6 +6368,7 @@ function Library:CreateSidePanel(title, opts)
 	-- place, Destroy removes. Returns nil when content is gone.
 	function panel:AddListRow(rowOpts)
 		rowOpts = rowOpts or {}
+		local host_ = rowOpts.Parent or content
 		local actions = {}
 		if type(rowOpts.Actions) == "table" then actions = rowOpts.Actions end
 		while #actions > 3 do table.remove(actions) end
@@ -6375,7 +6376,7 @@ function Library:CreateSidePanel(title, opts)
 		local row = make("Frame", {
 			Name = "SideRow", Size = UDim2.new(1, 0, 0, h),
 			BackgroundTransparency = 0.5, BorderSizePixel = 0,
-			Parent = content,
+			Parent = host_,
 		}, { BackgroundColor3 = "PageRaised" }, { corner(6), stroke("Rule2", 1, 0.4) })
 		if not row or not row.Parent then return nil end
 		local dot = make("Frame", {
@@ -6445,7 +6446,14 @@ function Library:CreateSidePanel(title, opts)
 		buildButtons(actions)
 		return api
 	end
-	function panel:AddSection(text)
+	function panel:AddRowGroup()
+		local g = make("Frame", {
+			Name = "SideRows", Size = UDim2.new(1, 0, 0, 0),
+			BackgroundTransparency = 1, BorderSizePixel = 0, AutomaticSize = AY,
+			Parent = content,
+		}, nil, { list(6) })
+		return g
+	endfunction panel:AddSection(text)
 		local sec = make("Frame", {
 			Name = "SideSection", Size = UDim2.new(1, 0, 0, 24),
 			BackgroundTransparency = 1, Parent = content,
