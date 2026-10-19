@@ -6453,7 +6453,8 @@ function Library:CreateSidePanel(title, opts)
 			Parent = content,
 		}, nil, { list(6) })
 		return g
-	endfunction panel:AddSection(text)
+	end
+	function panel:AddSection(text)
 		local sec = make("Frame", {
 			Name = "SideSection", Size = UDim2.new(1, 0, 0, 24),
 			BackgroundTransparency = 1, Parent = content,
