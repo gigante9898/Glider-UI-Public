@@ -5537,12 +5537,9 @@ function Library:AddDiscordTab(name, icon)
 	local tab = self:AddTab(name or "Discord", icon or Library.Icons.Misc, true)
 	self.DiscordTab = tab
 
-	tab:AddMarkdown([[
-# Community & Support
-
-- **Discord:** `jirxy_2`
-- Custom scripts from **+5EUR**. DM for any issue or request.
-]])
+	tab:AddSection("Community & Support")
+	tab:AddLabel("Discord: jirxy_2")
+	tab:AddLabel("Custom scripts from +5EUR. DM for any issue or requests.")
 	tab:AddButton({
 		Name = "Discord Server",
 		Callback = function()
