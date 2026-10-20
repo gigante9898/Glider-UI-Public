@@ -769,6 +769,12 @@ function Library.new(opts)
 		_popups = {},
 	}, Library)
 
+	-- Header subtitle shows the game/edition name only: strip a leading
+	-- "Glider | " brand prefix ("Glider | X" -> "X").
+	if type(self.Title) == "string" then
+		self.Title = self.Title:gsub("^[%-%s]*[Gg]lider%s*|%s*", "")
+	end
+
 	if opts.MenuKey then Library.MenuKey = opts.MenuKey end
 	do
 		local savedKey = Storage.loadMenuKey()
