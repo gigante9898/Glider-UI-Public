@@ -776,9 +776,8 @@ function Library.new(opts)
 	end
 
 	-- Promo banner (console, every menu boot -- AegisLoader-style).
-	-- TODO: replace REPLACE_ME with the real Discord invite link.
 	print("[Glider] Free scripts: aim, ESP, skin changer")
-	print("[Glider] Support + updates: https://discord.gg/REPLACE_ME")
+	print("[Glider] Support + updates: https://discord.gg/Z3vCpEPevt")
 
 	if opts.MenuKey then Library.MenuKey = opts.MenuKey end
 	do
