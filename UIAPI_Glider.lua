@@ -5549,14 +5549,20 @@ function Library:AddDiscordTab(name, icon)
 	self.DiscordTab = tab
 
 	tab:AddSection("Community & Support")
-	tab:AddLabel("Discord: jirxy_2")
-	tab:AddLabel("Custom scripts from +5EUR. DM for any issue or requests.")
+	tab:AddMarkdown([[
+# Community & Support
+Please let us know if there is any issue with our scripts!
+- Join the **Discord Server** for updates and support.
+- Custom scripts from **+5EUR** -- DM `jirxy_2` for any issue or request.
+---
+> Need help? Open a ticket or DM us on Discord.
+]])
 	tab:AddButton({
-		Name = "Discord Server",
+		Name = "Copy Discord Invite",
 		Callback = function()
 			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
 			if clipFn then pcall(clipFn, "https://discord.gg/Z3vCpEPevt") end
-			self:Notify({Title = "Discord Server", Body = "Copied to clipboard!", Type = "Success"})
+			self:Notify({Title = "Discord Server", Body = "Invite copied to clipboard!", Type = "Success"})
 		end,
 	})
 	tab:AddButton({
@@ -5565,14 +5571,6 @@ function Library:AddDiscordTab(name, icon)
 			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
 			if clipFn then pcall(clipFn, "jirxy_2") end
 			self:Notify({Title = "Discord Tag", Body = "Copied to clipboard!", Type = "Success"})
-		end,
-	})
-	tab:AddButton({
-		Name = "Custom Scripts: +5EUR (DM jirxy_2)",
-		Callback = function()
-			local clipFn = setclipboard or toclipboard or (syn and syn.write_clipboard)
-			if clipFn then pcall(clipFn, "jirxy_2") end
-			self:Notify({Title = "Commissions", Body = "Copied to clipboard!", Type = "Info"})
 		end,
 	})
 	return tab
