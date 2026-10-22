@@ -606,6 +606,8 @@ function Storage.saveWatermark(on) writeGlobal("watermark.txt", on and "1" or "0
 function Storage.loadWatermark() return loadBit("watermark.txt") end
 function Storage.saveKeyHUD(on) writeGlobal("keyhud.txt", on and "1" or "0") end
 function Storage.loadKeyHUD() return loadBit("keyhud.txt") end
+function Storage.saveAntiAfk(on) writeGlobal("antiafk.txt", on and "1" or "0") end
+function Storage.loadAntiAfk() return loadBit("antiafk.txt") end
 function Storage.saveWindowSize(w, h)
 	if type(w) == "number" and type(h) == "number" then
 		local data = HttpService:JSONEncode({ Width = math.floor(w), Height = math.floor(h) })
@@ -638,7 +640,7 @@ end
 
 -- Settings flags that are global preferences, not part of any config: configs never
 -- save, load or reset them, and Unload leaves them alone.
-local GLOBAL_FLAGS = {MenuKey = true, HideUsername = true, SoundFX = true, ShowWatermark = true, ShowKeybindHUD = true}
+local GLOBAL_FLAGS = {MenuKey = true, HideUsername = true, SoundFX = true, ShowWatermark = true, ShowKeybindHUD = true, AntiAfk = true}
 
 -- ---------------------------------------------------------------------------
 -- LIBRARY CORE
@@ -737,6 +739,83 @@ local function grain(parent, textRole)
 end
 
 -- ---------------------------------------------------------------------------
+-- ANTI-AFK
+-- ---------------------------------------------------------------------------
+-- Roblox drops the client after ~20 minutes without any input. Replaying one
+-- harmless input when the LocalPlayer reports "Idled" keeps the session alive
+-- without moving the character, so a menu can be left running overnight.
+local AntiAfk = { On = false, Connections = {}, Count = 0 }
+
+local function antiAfkNudge()
+	local virtualUser = game:GetService("VirtualUser")
+	pcall(function()
+		virtualUser:CaptureController()
+		virtualUser:ClickButton2(Vector2.new())
+	end)
+end
+
+local function antiAfkStop()
+	for _, conn in ipairs(AntiAfk.Connections) do
+		pcall(function() conn:Disconnect() end)
+	end
+	table.clear(AntiAfk.Connections)
+	AntiAfk.On = false
+end
+
+local function antiAfkStart()
+	if AntiAfk.On then return true end
+	local player = game:GetService("Players").LocalPlayer
+	if not player then return false end
+	AntiAfk.On = true
+	local function hook()
+		if not AntiAfk.On then return end
+		table.insert(AntiAfk.Connections, player.Idled:Connect(function()
+			AntiAfk.Count += 1
+			antiAfkNudge()
+		end))
+	end
+	hook()
+	-- A respawn keeps the same Player object, but a session refresh may not.
+	table.insert(AntiAfk.Connections, game:GetService("Players").PlayerRemoving:Connect(function(who)
+		if who == player and AntiAfk.On then
+			task.delay(1, function()
+				if not AntiAfk.On then return end
+				local again = game:GetService("Players").LocalPlayer
+				if again and again ~= player then
+					antiAfkStop()
+					antiAfkStart()
+				end
+			end)
+		end
+	end))
+	return true
+end
+
+-- Kept on the library so every menu built on it can toggle the same engine.
+function Library:SetAntiAfk(on, silent)
+	on = on and true or false
+	self.AntiAfkEnabled = on
+	if on then
+		antiAfkStart()
+	else
+		antiAfkStop()
+	end
+	pcall(function() Storage.saveAntiAfk(on) end)
+	if not silent then
+		self:Notify({
+			Title = "Anti-AFK",
+			Body = on and "Session will stay awake while the game is left alone" or "Anti-AFK turned off",
+			Type = on and "Success" or "Warning",
+		})
+	end
+	return on
+end
+
+function Library:IsAntiAfkOn()
+	return self.AntiAfkEnabled == true and AntiAfk.On
+end
+
+-- ---------------------------------------------------------------------------
 -- WINDOW CREATION
 -- ---------------------------------------------------------------------------
 local RAIL_W, BRAND_H = 176, 84
@@ -818,6 +897,11 @@ function Library.new(opts)
 	self.ShowKeybindHUD = true
 	local hudSaved = Storage.loadKeyHUD()
 	if hudSaved ~= nil then self.ShowKeybindHUD = hudSaved end
+	-- Anti-AFK is a global preference too, on by default.
+	self.AntiAfkEnabled = true
+	local antiAfkSaved = Storage.loadAntiAfk()
+	if antiAfkSaved ~= nil then self.AntiAfkEnabled = antiAfkSaved end
+	if self.AntiAfkEnabled then pcall(antiAfkStart) end
 
 	-- Root ScreenGui
 	self.Gui = create("ScreenGui", {
@@ -1788,6 +1872,15 @@ function Library:_buildSettingsTab(name, icon)
 			if not self.Unloaded then Storage.saveKeyHUD(v) end
 		end,
 	})
+	tab:AddToggle({
+		Name = "Anti-AFK",
+		Flag = "AntiAfk",
+		Default = self.AntiAfkEnabled ~= false,
+		Callback = function(v)
+			self:SetAntiAfk(v, false)
+			if not self.Unloaded then Storage.saveAntiAfk(v) end
+		end,
+	})
 	local unloadRow = tab:AddButton({
 		Name = "Unload " .. self.Brand,
 		Danger = true,
@@ -1964,6 +2057,8 @@ function Library:Unload(instant)
 	if self.Unloaded then return end
 	self.Unloaded = true
 	self._applying = true
+	-- The anti-AFK connection belongs to the menu, so it goes with it.
+	pcall(antiAfkStop)
 	for _, el in pairs(Library.Elements) do
 		if el.Type == "Toggle" and el.Value and not GLOBAL_FLAGS[el.Flag] then pcall(el.Set, el, false) end
 	end
