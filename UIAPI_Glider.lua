@@ -1084,6 +1084,16 @@ function Library.new(opts)
 	if opts.Discord ~= false then self:AddDiscordTab(opts.DiscordName, opts.DiscordIcon) end
 	self:_refreshConfigStatus()
 
+	-- Automatic executor support warning (Xeno/Solara markdown modal).
+	-- Zero per-script setup: every menu built with Library.new() gets it.
+	-- Opt out per script with Library.new({ SkipExecutorCheck = true }).
+	if opts.SkipExecutorCheck ~= true then
+		task.defer(function()
+			if self.Unloaded then return end
+			pcall(function() self:CheckExecutorSupport() end)
+		end)
+	end
+
 	if getgenv then getgenv()[GLOBAL_KEY] = self end
 	return self
 end
@@ -2643,7 +2653,15 @@ function Tab:AddMarkdown(md, opts)
 			Role = role or "Text",
 		})
 		local function fit()
-			local textH = l.AbsoluteSize.Y / self.Window:_uiScale()
+			-- Modal popups render markdown with a window (or the Tab class) as
+			-- self, which has no .Window link: resolve the UI scale safely.
+			local s = 1
+			local hostWin = (self and self.Window) or (self and self.Main and self)
+			if hostWin and type(hostWin._uiScale) == "function" then
+				local ok, v = pcall(function() return hostWin:_uiScale() end)
+				if ok and type(v) == "number" and v > 0 then s = v end
+			end
+			local textH = l.AbsoluteSize.Y / s
 			f.Size = UDim2.new(1, 0, 0, math.max(ROW_H, math.ceil(textH) + 24))
 		end
 		l:GetPropertyChangedSignal("AbsoluteSize"):Connect(fit)
@@ -5213,7 +5231,32 @@ function Library:Prompt(opts)
 
 	for i, btn in ipairs(buttons) do
 		local b = textButton(footer, btn.Text or "", btn.Kind, i)
+		-- Optional click delay: Cooldown = seconds. The button shows a
+		-- countdown ("Continue (5)") and ignores clicks until it hits 0.
+		local cooldown = math.floor(tonumber(btn.Cooldown) or 0)
+		local baseText = btn.Text or ""
+		if cooldown > 0 then
+			local left = cooldown
+			b.Active = false
+			b.TextTransparency = 0.5
+			b.Text = track(baseText) .. "  (" .. left .. ")"
+			task.spawn(function()
+				while left > 0 do
+					task.wait(1)
+					if prompt.Closed then return end
+					left -= 1
+					if left > 0 then
+						b.Text = track(baseText) .. "  (" .. left .. ")"
+					else
+						b.Text = track(baseText)
+						b.TextTransparency = 0
+						b.Active = true
+					end
+				end
+			end)
+		end
 		connect(b.MouseButton1Click, function()
+			if cooldown > 0 and b.Active == false then return end
 			playSound("Click")
 			if btn.Callback then pcall(btn.Callback) end
 			close()
@@ -5262,6 +5305,107 @@ function Library:Confirm(opts)
 			end},
 		},
 	})
+end
+
+-- ---------------------------------------------------------------------------
+-- EXECUTOR SUPPORT WARNING (Xeno / Solara)
+-- Detects the running executor and shows a markdown-based modal popup when it
+-- is known to have limited support. Usage (one line after Library.new):
+--   win:CheckExecutorSupport()
+-- ---------------------------------------------------------------------------
+function Library:GetExecutorName()
+	-- Per Potassium docs: identifyexecutor() returns (name, version).
+	-- Alias: getexecutorname. Both names are documented; anything else is not.
+	-- NOTE: plain env[key] access, NOT rawget. Executor globals like
+	-- identifyexecutor resolve through the environment metatable, so rawget
+	-- misses them (verified live: rawget -> nil, direct call -> works).
+	local function tryGlobal(key)
+		local ok, fn = pcall(function()
+			local env = getfenv and getfenv() or _G
+			local f = env and env[key] or nil
+			if type(f) ~= "function" and type(_G) == "table" then
+				f = _G[key]
+			end
+			return f
+		end)
+		if not ok or type(fn) ~= "function" then return nil end
+		local okCall, name, _version = pcall(fn)
+		if okCall and type(name) == "string" and name ~= "" then return name end
+		return nil
+	end
+	local name = tryGlobal("identifyexecutor")
+		or tryGlobal("getexecutorname")
+	if type(name) ~= "string" or name == "" then
+		name = "Unknown"
+	end
+	return name
+end
+
+function Library:IsLowSupportExecutor(name)
+	if type(name) ~= "string" or name == "" then
+		name = self:GetExecutorName()
+	end
+	local lower = string.lower(tostring(name))
+	local unsupported = lower:find("xeno", 1, true) ~= nil or lower:find("solara", 1, true) ~= nil
+	if not unsupported then
+		-- Test hook (dev only, per session): run this in the executor
+		-- console BEFORE executing any script to force the warning:
+		--   getgenv().GliderTestExecutorWarn = true
+		-- Production sessions never set it, so behavior is unchanged.
+		if type(getgenv) == "function" then
+			local ok, env = pcall(getgenv)
+			if ok and type(env) == "table" and env.GliderTestExecutorWarn == true then
+				unsupported = true
+			end
+		end
+	end
+	return unsupported, name
+end
+
+function Library:ShowExecutorWarning(opts)
+	opts = opts or {}
+	local win = self
+	local execName = opts.ExecutorName or self:GetExecutorName()
+	local md = opts.Markdown or ([[
+# Executor Warning
+Detected executor: `]] .. tostring(execName) .. [[`
+---
+**MY SCRIPTS ARE MOST LIKELY NOT SUPPORTED FOR XENO OR SOLARA.**
+- Expect missing features, broken visuals, or crashes on these executors.
+- For the best experience use a fully supported executor.
+---
+> IF YOU STILL WANNA TRY THEN CONTINUE.
+> To see supported executors join our Discord: https://discord.gg/Z3vCpEPevt
+]])
+	return self:Prompt({
+		Title = opts.Title or "Unsupported Executor",
+		Kind = opts.Kind or "Warning",
+		Width = opts.Width or 360,
+		Dismissable = opts.Dismissable ~= nil and opts.Dismissable or false,
+		Content = function(body)
+			Tab.AddMarkdown(win, md, { Parent = body })
+		end,
+		Buttons = opts.Buttons or {
+			{ Text = opts.ContinueText or "Continue", Kind = "primary",
+				Cooldown = opts.ContinueCooldown or 5, Callback = function()
+				if opts.OnContinue then pcall(opts.OnContinue) end
+			end },
+		},
+		Timeout = opts.Timeout,
+		OnTimeout = opts.OnTimeout,
+	})
+end
+
+-- Shows the warning popup only when the current executor is Xeno or Solara.
+-- Returns the prompt handle on unsupported executors, nil otherwise.
+function Library:CheckExecutorSupport(opts)
+	opts = opts or {}
+	local unsupported = self:IsLowSupportExecutor(opts.ExecutorName)
+	if unsupported then
+		return self:ShowExecutorWarning(opts)
+	end
+	if opts.OnSupported then pcall(opts.OnSupported) end
+	return nil
 end
 
 -- ---------------------------------------------------------------------------
