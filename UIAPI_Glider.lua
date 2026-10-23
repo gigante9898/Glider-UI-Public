@@ -1309,6 +1309,22 @@ function Library:_applyFit()
 		self.Main.Position = UDim2.new(0.5, 0, 0.5, 0)
 	end
 end
+-- Mobile content is bigger than the rail once a script adds a handful of tabs:
+-- Roblox does not always refresh AutomaticCanvasSize from a UIListLayout inside
+-- a scaled/animated frame, so the tab list must be sized by hand or the last
+-- tabs become unreachable (clipped, no scrollbar).
+function Library:_refreshTabCanvas()
+	local list = self.TabList
+	if not list or not list.Parent then return end
+	local lay = list:FindFirstChildWhichIsA("UIListLayout")
+	local content = lay and math.ceil(lay.AbsoluteContentSize.Y) or 0
+	if content <= 0 then return end -- not laid out yet: the next AddTab/rail pass fixes it
+	list.AutomaticCanvasSize = Enum.AutomaticSize.None
+	-- Content only: maxing with AbsoluteSize would keep a stale canvas after the
+	-- touch fit shrinks the rail, leaving a scrollbar over empty space.
+	list.CanvasSize = UDim2.new(0, 0, 0, content + 4)
+end
+
 -- Sizes the tab list around the pinned tabs at the bottom of the rail.
 function Library:_layoutRail()
 	local n = self._pinnedCount
@@ -1330,6 +1346,7 @@ function Library:_layoutRail()
 		for _, child in ipairs(self.PinnedList:GetChildren()) do
 			if child:IsA("GuiButton") then child.Size = UDim2.new(1 / math.max(n, 1), -6, 0, 34) end
 		end
+		task.defer(function() self:_refreshTabCanvas() end)
 		return
 	end
 	local items = 1 + (n > 0 and (2 + n) or 0)
@@ -1338,6 +1355,7 @@ function Library:_layoutRail()
 	self.TabList.Size = UDim2.new(1, -1, 1, -BRAND_H - h)
 	self.FootRule.Visible = n > 0
 	self.FootGap.Visible = n > 0
+	task.defer(function() self:_refreshTabCanvas() end)
 end
 
 function Library:_refreshConfigStatus()
@@ -2549,6 +2567,7 @@ function Library:AddTab(name, icon, pinned)
 
 	table.insert(self.Tabs, tab)
 	if pinned then self:_layoutRail() end
+	task.defer(function() self:_refreshTabCanvas() end)
 	if not self.CurrentTab or (self.CurrentTab.Pinned and not pinned) then self:SelectTab(tab) end
 	return tab
 end
