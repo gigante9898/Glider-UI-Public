@@ -852,6 +852,10 @@ end
 -- WINDOW CREATION
 -- ---------------------------------------------------------------------------
 local RAIL_W, BRAND_H = 176, 84
+-- Touch layout: the brand block loses its rule and game label and the pinned
+-- tabs collapse into one icon row, so the tab list keeps a usable height on a
+-- short phone window.
+local BRAND_H_M = 52
 
 function Library.new(opts)
 	opts = opts or {}
@@ -998,19 +1002,28 @@ function Library.new(opts)
 	}, {BackgroundColor3 = "ChromeRule"})
 	self.TabRail = rail
 
-	local brand = create("Frame", {Name = "Brand", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, BRAND_H - 12), ZIndex = 15, Parent = rail})
+	self._brandH = IS_MOBILE and BRAND_H_M or BRAND_H
+	local brand = create("Frame", {Name = "Brand", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, self._brandH - 12), ZIndex = 15, Parent = rail})
 	self.BrandMark = plume(brand, 26, "Chrome", {AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.fromOffset(29, 30), ZIndex = 20}, self)
 	self.BrandLabel = label({
 		Text = self.Brand, FontFace = FONTS.Brand, TextSize = 24, Role = "ChromeText", TextTruncate = TRUNC,
 		Size = UDim2.new(1, -56, 0, 28), Position = UDim2.fromOffset(46, 16), Parent = brand,
 	})
-	make("Frame", {Size = UDim2.fromOffset(14, 1), Position = UDim2.fromOffset(20, 58), BorderSizePixel = 0, Parent = brand},
+	local brandDash = make("Frame", {Size = UDim2.fromOffset(14, 1), Position = UDim2.fromOffset(20, 58), BorderSizePixel = 0, Parent = brand},
 		{BackgroundColor3 = "ChromeAccent"})
 	self.GameLabel = label({
 		Text = track(self.Title), FontFace = FONTS.BodySemi, TextSize = 10, Role = "ChromeSub", TextTruncate = TRUNC,
 		Size = UDim2.new(1, -52, 0, 12), Position = UDim2.fromOffset(40, 52), Parent = brand,
 	})
 	self.TitleLabel = self.GameLabel
+	if IS_MOBILE then
+		self.BrandMark.Position = UDim2.fromOffset(26, 26)
+		self.BrandLabel.Position = UDim2.fromOffset(44, 12)
+		self.BrandLabel.TextSize = 20
+		self.BrandLabel.Size = UDim2.new(1, -54, 0, 28)
+		brandDash.Visible = false
+		self.GameLabel.Visible = false -- the name is already in the watermark
+	end
 
 	-- Active-tab marker: an accent wash plus a slanted bar; glides between tabs.
 	self.TabMarker = make("Frame", {
@@ -1029,7 +1042,7 @@ function Library.new(opts)
 
 	self.TabList = create("ScrollingFrame", {
 		Name = "Tabs", BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 2,
-		Position = UDim2.fromOffset(0, BRAND_H), Size = UDim2.new(1, -1, 1, -BRAND_H - 34),
+		Position = UDim2.fromOffset(0, self._brandH), Size = UDim2.new(1, -1, 1, -self._brandH - 34),
 		ScrollBarThickness = 0, CanvasSize = UDim2.new(), AutomaticCanvasSize = AY, Parent = rail,
 	}, {list(2)})
 	connect(self.TabList:GetPropertyChangedSignal("CanvasPosition"), function() self:_syncMarker(false) end)
@@ -1037,7 +1050,7 @@ function Library.new(opts)
 	self.Foot = create("Frame", {
 		Name = "Foot", BackgroundTransparency = 1, ZIndex = 2, AnchorPoint = Vector2.new(0, 1),
 		Position = UDim2.fromScale(0, 1), Size = UDim2.new(1, -1, 0, 34), Parent = rail,
-	}, {list(2, nil, {VerticalAlignment = Enum.VerticalAlignment.Bottom})})
+	}, {list(2, IS_MOBILE and H or nil, IS_MOBILE and {HorizontalAlignment = Enum.HorizontalAlignment.Center, VerticalAlignment = Enum.VerticalAlignment.Center} or {VerticalAlignment = Enum.VerticalAlignment.Bottom})})
 	self.FootRule = make("Frame", {Size = UDim2.new(1, 0, 0, 1), BorderSizePixel = 0, LayoutOrder = 0, Visible = false, Parent = self.Foot},
 		{BackgroundColor3 = "ChromeRule"})
 	self.FootGap = create("Frame", {Size = UDim2.new(1, 0, 0, 4), BackgroundTransparency = 1, LayoutOrder = 1, Visible = false, Parent = self.Foot})
@@ -1059,6 +1072,7 @@ function Library.new(opts)
 		AutomaticSize = AX, Size = UDim2.fromOffset(0, 14), LayoutOrder = 3, Parent = status,
 	})
 	restyle(status, function() self:_refreshConfigStatus() end)
+	if IS_MOBILE then status.Visible = false end -- no room for the config line in the icon row
 
 	-- -----------------------------------------------------------------------
 	-- PAGE: header (tab title + tools) and the scrolling content
@@ -1298,6 +1312,26 @@ end
 -- Sizes the tab list around the pinned tabs at the bottom of the rail.
 function Library:_layoutRail()
 	local n = self._pinnedCount
+	if IS_MOBILE then
+		-- One compact icon row at the bottom: the tab list keeps the rest.
+		local bh = self._brandH or BRAND_H_M
+		local fh = n > 0 and 39 or 0
+		self.Foot.Size = UDim2.new(1, -1, 0, fh)
+		-- The rule cannot stay inside the foot: in a horizontal list it would eat a
+		-- whole slot and push the icons off the rail. Anchor it to the rail instead.
+		self.FootRule.Parent = self.TabRail
+		self.FootRule.Size = UDim2.new(1, -1, 0, 1)
+		self.FootRule.AnchorPoint = Vector2.new(0, 0)
+		self.FootRule.Position = UDim2.new(0, 0, 1, -fh)
+		self.FootRule.Visible = n > 0
+		self.FootGap.Visible = false
+		self.TabList.Position = UDim2.fromOffset(0, bh)
+		self.TabList.Size = UDim2.new(1, -1, 1, -bh - fh)
+		for _, child in ipairs(self.PinnedList:GetChildren()) do
+			if child:IsA("GuiButton") then child.Size = UDim2.new(1 / math.max(n, 1), -6, 0, 34) end
+		end
+		return
+	end
 	local items = 1 + (n > 0 and (2 + n) or 0)
 	local h = 34 + (n > 0 and (1 + 4 + n * 34) or 0) + (items - 1) * 2
 	self.Foot.Size = UDim2.new(1, -1, 0, h)
@@ -2455,6 +2489,22 @@ function Library:AddTab(name, icon, pinned)
 	tab.NameLabel:GetPropertyChangedSignal("FontFace"):Connect(placeBadge)
 	placeBadge()
 
+	if IS_MOBILE and pinned then
+		-- Touch layout: the pinned tabs are an icon row, so nothing but the glyph shows.
+		tab.NameLabel.Visible = false
+		tab.Badge.Visible = false
+		if tab.Icon then
+			tab.Icon.Position = UDim2.fromScale(0.5, 0.5)
+			tab.Icon.AnchorPoint = Vector2.new(0.5, 0.5)
+			tab.Icon.Size = UDim2.fromOffset(16, 16)
+		end
+		if tab.Num then
+			tab.Num.Position = UDim2.new(0.5, -9, 0, 0)
+			tab.Num.Size = UDim2.fromOffset(18, 34)
+			tab.Num.TextXAlignment = CENTER
+		end
+	end
+
 	function tab._paint(animate)
 		local T = CURRENT_THEME
 		local on = self.CurrentTab == tab
@@ -2564,8 +2614,14 @@ function Library:_syncMarker(animate)
 	local s = self:_uiScale()
 	local y = math.floor((btn.AbsolutePosition.Y - rail.AbsolutePosition.Y) / s + 0.5)
 	local railH = rail.AbsoluteSize.Y / s
-	local visible = tab.Pinned or (y >= BRAND_H - 4 and y <= railH - self.Foot.Size.Y.Offset - 30)
+	local visible = tab.Pinned or (y >= (self._brandH or BRAND_H) - 4 and y <= railH - self.Foot.Size.Y.Offset - 30)
 	local goal = UDim2.fromOffset(0, y)
+	if IS_MOBILE and tab.Pinned then
+		m.Size = UDim2.fromOffset(math.floor(btn.AbsoluteSize.X / s + 0.5), 34)
+		goal = UDim2.fromOffset(math.floor((btn.AbsolutePosition.X - rail.AbsolutePosition.X) / s + 0.5), y)
+	else
+		m.Size = UDim2.new(1, -1, 0, 34)
+	end
 	if animate and visible and m.Visible then
 		tween(m, {Position = goal}, SLIDE)
 	else
@@ -3907,6 +3963,54 @@ local function setupModelViewport(viewport, item)
 	return { Model = model, Camera = cam, Center = center, Dist = dist, Angle = math.atan2(dist * 0.9, dist * 0.7) }
 end
 
+-- Eight is the identity Roblox wants for instance writes from an executor.
+local function threadEight()
+	local fn = setthreadidentity or (syn and syn.set_thread_identity)
+	if fn then pcall(fn, 8) end
+end
+
+-- Clear the tiles of a picker before a rebuild: the records, their buttons and
+-- any leftover button still sitting in the scroll frame.
+local function wipeTiles(tiles, scroll)
+	for _, t in pairs(tiles) do
+		if t.Button then pcall(function() t.Button:Destroy() end) end
+	end
+	table.clear(tiles)
+	for _, child in ipairs(scroll:GetChildren()) do
+		if child:IsA("GuiButton") then pcall(function() child:Destroy() end) end
+	end
+end
+
+-- Picker header: the widget name on the left, the current value on the right.
+-- AddModelGrid, AddImageGrid and AddIconRow all want exactly this row.
+local function pickerHead(tab, name, fallback)
+	local f = row(tab, ROW_H)
+	label({
+		Text = name or fallback, TextTruncate = TRUNC,
+		Size = UDim2.new(0.55, -PAD, 0, ROW_H), Position = UDim2.fromOffset(PAD, 0), Parent = f,
+	})
+	return label({
+		Text = "", FontFace = FONTS.Italic, TextSize = 13, TextXAlignment = RIGHT, TextTruncate = TRUNC,
+		Size = UDim2.new(0.45, -(PAD + 8), 0, ROW_H), Position = UDim2.new(1, -(PAD + 8), 0, 0),
+		AnchorPoint = Vector2.new(1, 0), Parent = f,
+	})
+end
+
+-- The three tile pickers (models, images, icons) only differ in what they draw,
+-- so the selection bookkeeping lives here once instead of three times.
+local function tileSet(el, value, silent, items, valueLabel, paintTiles, touch)
+	el.Value = tostring(value or "")
+	Library.Flags[el.Flag] = el.Value
+	if touch then touch() end
+	local found = ""
+	for _, it in ipairs(items) do
+		if tostring(it.Id) == el.Value then found = it.Name or tostring(it.Id) break end
+	end
+	if valueLabel then valueLabel.Text = found end
+	paintTiles()
+	if not silent and el.Callback then el.Callback(el.Value) end
+end
+
 function Tab:AddModelGrid(opts)
 	opts = opts or {}
 	local columns = opts.Columns or 3
@@ -3918,16 +4022,7 @@ function Tab:AddModelGrid(opts)
 	local items = opts.Items or {}
 
 	-- Header row: grid name + selected value.
-	local f = row((opts and opts.Parent) or self, ROW_H)
-	label({
-		Text = opts.Name or "Models", TextTruncate = TRUNC,
-		Size = UDim2.new(0.55, -PAD, 0, ROW_H), Position = UDim2.fromOffset(PAD, 0), Parent = f,
-	})
-	local valueLabel = label({
-		Text = "", FontFace = FONTS.Italic, TextSize = 13, TextXAlignment = RIGHT, TextTruncate = TRUNC,
-		Size = UDim2.new(0.45, -(PAD + 8), 0, ROW_H), Position = UDim2.new(1, -(PAD + 8), 0, 0),
-		AnchorPoint = Vector2.new(1, 0), Parent = f,
-	})
+	local valueLabel = pickerHead((opts and opts.Parent) or self, opts.Name, "Models")
 
 	-- Body block: scrolling grid of tiles.
 	local body = block((opts and opts.Parent) or self, gridH + PAD * 2)
@@ -3971,35 +4066,15 @@ function Tab:AddModelGrid(opts)
 	end
 	restyle(body, paintTiles)
 
-	function el:Set(id, silent)
-		self.Value = tostring(id or "")
-		Library.Flags[self.Flag] = self.Value
-		touch()
-		local found = ""
-		for _, it in ipairs(items) do
-			if tostring(it.Id) == self.Value then found = it.Name or tostring(it.Id) break end
-		end
-		valueLabel.Text = found
-		paintTiles()
-		if not silent then self.Callback(self.Value) end
-	end
+	function el:Set(id, silent) return tileSet(self, id, silent, items, valueLabel, paintTiles, touch) end
 
 	function el:Get() return self.Value end
 
 	function el:SetItems(newItems, silent)
-		local setidentity = setthreadidentity or (syn and syn.set_thread_identity)
-		if setidentity then pcall(setidentity, 8) end
+		threadEight()
 		items = newItems or {}
-		for _, t in pairs(tiles) do
-			if t.Button then pcall(function() t.Button:Destroy() end) end
-		end
-		table.clear(tiles)
+		wipeTiles(tiles, scroll)
 		table.clear(previews)
-		for _, child in ipairs(scroll:GetChildren()) do
-			if child:IsA("GuiButton") then
-				pcall(function() child:Destroy() end)
-			end
-		end
 		local cap = math.min(#items, opts.MaxTiles or 60)
 		gridGen += 1
 		local myGen = gridGen
@@ -4124,16 +4199,7 @@ function Tab:AddImageGrid(opts)
 
 	local f, valueLabel
 	if not opts.HideHeader then
-		f = row((opts and opts.Parent) or self, ROW_H)
-		label({
-			Text = opts.Name or "Images", TextTruncate = TRUNC,
-			Size = UDim2.new(0.55, -PAD, 0, ROW_H), Position = UDim2.fromOffset(PAD, 0), Parent = f,
-		})
-		valueLabel = label({
-			Text = "", FontFace = FONTS.Italic, TextSize = 13, TextXAlignment = RIGHT, TextTruncate = TRUNC,
-			Size = UDim2.new(0.45, -(PAD + 8), 0, ROW_H), Position = UDim2.new(1, -(PAD + 8), 0, 0),
-			AnchorPoint = Vector2.new(1, 0), Parent = f,
-		})
+		valueLabel = pickerHead((opts and opts.Parent) or self, opts.Name, "Images")
 	end
 
 	local gridLayout = create("UIGridLayout", {
@@ -4235,18 +4301,7 @@ function Tab:AddImageGrid(opts)
 	end
 	restyle(body, paintTiles)
 
-	function el:Set(id, silent)
-		self.Value = tostring(id or "")
-		Library.Flags[self.Flag] = self.Value
-		touch()
-		local found = ""
-		for _, it in ipairs(items) do
-			if tostring(it.Id) == self.Value then found = it.Name or tostring(it.Id) break end
-		end
-		if valueLabel then valueLabel.Text = found end
-		paintTiles()
-		if not silent and self.Callback then self.Callback(self.Value) end
-	end
+	function el:Set(id, silent) return tileSet(self, id, silent, items, valueLabel, paintTiles, nil) end
 
 	function el:Get() return self.Value end
 
@@ -4254,18 +4309,9 @@ function Tab:AddImageGrid(opts)
 	function el:SetClickCallback(fn) self.OnClick = fn end
 
 	function el:SetItems(newItems, silent)
-		local setidentity = setthreadidentity or (syn and syn.set_thread_identity)
-		if setidentity then pcall(setidentity, 8) end
+		threadEight()
 		items = newItems or {}
-		for _, t in pairs(tiles) do
-			if t.Button then pcall(function() t.Button:Destroy() end) end
-		end
-		table.clear(tiles)
-		for _, child in ipairs(scroll:GetChildren()) do
-			if child:IsA("GuiButton") then
-				pcall(function() child:Destroy() end)
-			end
-		end
+		wipeTiles(tiles, scroll)
 		local cap = math.min(#items, opts.MaxTiles or 80)
 		for i = 1, cap do
 			local okTile, errTile = pcall(function()
@@ -4466,16 +4512,7 @@ function Tab:AddIconRow(opts)
 	register(el, opts, self)
 	local items = opts.Items or {}
 
-	local f = row((opts and opts.Parent) or self, ROW_H)
-	label({
-		Text = opts.Name or "Pick", TextTruncate = TRUNC,
-		Size = UDim2.new(0.55, -PAD, 0, ROW_H), Position = UDim2.fromOffset(PAD, 0), Parent = f,
-	})
-	local valueLabel = label({
-		Text = "", FontFace = FONTS.Italic, TextSize = 13, TextXAlignment = RIGHT, TextTruncate = TRUNC,
-		Size = UDim2.new(0.45, -(PAD + 8), 0, ROW_H), Position = UDim2.new(1, -(PAD + 8), 0, 0),
-		AnchorPoint = Vector2.new(1, 0), Parent = f,
-	})
+	local valueLabel = pickerHead((opts and opts.Parent) or self, opts.Name, "Pick")
 
 	local body = block((opts and opts.Parent) or self, tileSize + 14 + PAD * 2)
 	local scroll = make("ScrollingFrame", {
@@ -4527,34 +4564,14 @@ function Tab:AddIconRow(opts)
 	end
 	restyle(body, paintTiles)
 
-	function el:Set(id, silent)
-		self.Value = tostring(id or "")
-		Library.Flags[self.Flag] = self.Value
-		touch()
-		local found = ""
-		for _, it in ipairs(items) do
-			if tostring(it.Id) == self.Value then found = it.Name or tostring(it.Id) break end
-		end
-		valueLabel.Text = found
-		paintTiles()
-		if not silent then self.Callback(self.Value) end
-	end
+	function el:Set(id, silent) return tileSet(self, id, silent, items, valueLabel, paintTiles, touch) end
 
 	function el:Get() return self.Value end
 
 	function el:SetItems(newItems, silent)
-		local setidentity = setthreadidentity or (syn and syn.set_thread_identity)
-		if setidentity then pcall(setidentity, 8) end
+		threadEight()
 		items = newItems or {}
-		for _, t in pairs(tiles) do
-			if t.Button then pcall(function() t.Button:Destroy() end) end
-		end
-		table.clear(tiles)
-		for _, child in ipairs(scroll:GetChildren()) do
-			if child:IsA("GuiButton") then
-				pcall(function() child:Destroy() end)
-			end
-		end
+		wipeTiles(tiles, scroll)
 		for i, item in ipairs(items) do
 			local okTile, errTile = pcall(function()
 				if type(item) ~= "table" then error("bad item at index " .. tostring(i)) end
@@ -6495,8 +6512,7 @@ function Library:CreateSidePanel(title, opts)
 		return {
 			Row = row, TitleLabel = tLbl, ActionButton = actionBtn,
 			SetAction = function(txt, cb)
-				local setidentity = setthreadidentity or (syn and syn.set_thread_identity)
-				if setidentity then pcall(setidentity, 8) end
+				threadEight()
 				pcall(function()
 					if actionBtn and txt then actionBtn.Text = tostring(txt) end
 				end)
@@ -6589,8 +6605,7 @@ function Library:CreateSidePanel(title, opts)
 
 		local gridGen = 0
 		function gridObj:SetItems(items)
-			local setidentity = setthreadidentity or (syn and syn.set_thread_identity)
-			if setidentity then pcall(setidentity, 8) end
+			threadEight()
 			items = items or {}
 			gridGen = gridGen + 1
 			local myGen = gridGen
