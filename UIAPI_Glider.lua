@@ -1914,6 +1914,7 @@ function Library:_buildSettingsTab(name, icon)
 	tab:AddSection("Session")
 	tab:AddButton({
 		Name = "Forget this script",
+		Desc = "Forgets a remembered access for this script: clears the saved key and the remembered build, so the loader asks again next time.",
 		Danger = true,
 		Callback = function()
 			local ok, removed = pcall(ForgetLoaderSession)
@@ -3127,6 +3128,26 @@ function Tab:AddButton(opts)
 		Position = UDim2.fromOffset(PAD, 0),
 		Parent = f,
 	})
+	-- Optional one-line description under the label (opts.Desc). The row grows
+	-- so the text never overlaps the button title.
+	if opts.Desc and opts.Desc ~= "" then
+		f.Size = UDim2.new(1, 0, 0, ROW_H + 18)
+		text.TextYAlignment = Enum.TextYAlignment.Top
+		text.Size = UDim2.new(1, -160, 0, 18)
+		text.Position = UDim2.fromOffset(PAD, 7)
+		local desc = label({
+			Name = "Desc",
+			Text = opts.Desc,
+			FontFace = FONTS.Body,
+			TextSize = 12,
+			Role = "SubText",
+			TextTruncate = TRUNC,
+			Size = UDim2.new(1, -160, 0, 14),
+			Position = UDim2.fromOffset(PAD, 26),
+			Parent = f,
+		})
+		desc.ZIndex = 2
+	end
 	local ink = make("Frame", {
 		Size = UDim2.fromOffset(0, 1), Position = UDim2.new(0, PAD, 0.5, 10), BackgroundTransparency = 1,
 		BorderSizePixel = 0, Parent = f,
