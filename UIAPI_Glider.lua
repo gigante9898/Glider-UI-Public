@@ -26,9 +26,42 @@ local RunService      = game:GetService("RunService")
 local SoundService    = game:GetService("SoundService")
 local StatsService    = game:GetService("Stats")
 local ContentProvider = game:GetService("ContentProvider")
+local GuiService      = game:GetService("GuiService")
 
 local LocalPlayer = Players.LocalPlayer
+-- Touch layout. It can be forced from the outside to preview it on a desktop:
+--   getgenv().GliderForceMobile = true   (before loading the library)
+--   or Library.new({ Mobile = true })
 local IS_MOBILE   = UIS.TouchEnabled and not UIS.KeyboardEnabled
+if getgenv and getgenv().GliderForceMobile == true then IS_MOBILE = true end
+
+-- Safe drawing area: phones reserve the top strip for the Roblox topbar.
+local function topbarInset()
+	local y = 0
+	pcall(function()
+		local tb = GuiService.TopbarInset
+		if typeof(tb) == "Rect" and tb.Y then y = tb.Y end
+	end)
+	if y <= 0 then
+		pcall(function()
+			local top = GuiService:GetGuiInset()
+			if typeof(top) == "Vector2" then y = top.Y end
+		end)
+	end
+	return math.max(y, 0)
+end
+
+local function viewportSize(gui)
+	local cam = workspace.CurrentCamera
+	local vp = cam and cam.ViewportSize or Vector2.new(0, 0)
+	-- Very early in the frame the camera still reports 1x1; the menu Gui (which
+	-- is parented before the first render) already knows the real screen size.
+	if (vp.X < 50 or vp.Y < 50) and gui then
+		local a = gui.AbsoluteSize
+		if a.X > 50 and a.Y > 50 then return a end
+	end
+	return vp
+end
 
 -- Instance-creation capability probe (v0.2 hardening). Restricted threads
 -- (Studio command bar, sandboxed loaders) block Instance.new with
@@ -909,6 +942,8 @@ function Library.new(opts)
 		ResetOnSpawn = false,
 		IgnoreGuiInset = true,
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		-- Above the touch thumbstick/jump buttons so the menu covers them.
+		DisplayOrder = 999,
 	})
 	self.Gui.Parent = guiParent(self.Gui)
 
@@ -916,6 +951,23 @@ function Library.new(opts)
 	local savedWinSize = Storage.loadWindowSize()
 	local initW = (savedWinSize and savedWinSize.Width) or opts.Width or 880
 	local initH = (savedWinSize and savedWinSize.Height) or opts.Height or 560
+
+	-- Touch layout switches on for phones/tablets, or when it is forced.
+	if opts.Mobile == true then IS_MOBILE = true end
+	self.MobileFit = opts.MobileFit ~= false
+	self.PreviewViewport = opts.PreviewViewport
+
+	-- Root: a full-screen host that carries the safety inset and, on touch, the
+	-- shrink-to-fit scale. The window is centred inside it, so on a phone the
+	-- whole menu is always visible below the Roblox topbar.
+	self.Root = make("Frame", {
+		Name = "Root",
+		Size = UDim2.fromScale(1, 1),
+		BackgroundTransparency = 1,
+		BorderSizePixel = 0,
+		Parent = self.Gui,
+	})
+	self.Fit = create("UIScale", {Scale = 1, Parent = self.Root})
 
 	-- Main Window Frame (never a CanvasGroup: it renders the whole menu darker)
 	self.Main = make("Frame", {
@@ -925,10 +977,11 @@ function Library.new(opts)
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
-		Parent = self.Gui,
+		Parent = self.Root,
 	}, {BackgroundColor3 = "PageBg"}, {corner(6), stroke("Edge")})
 	self.Scale = create("UIScale", {Scale = 1, Parent = self.Main})
 	grain(self.Main, "Text")
+	pcall(function() self:_applyFit() end)
 
 	-- -----------------------------------------------------------------------
 	-- RAIL: brand, tab list, pinned tabs, config status
@@ -1088,6 +1141,8 @@ function Library.new(opts)
 		Text = "", AutoButtonColor = false, BackgroundTransparency = 1,
 		Size = UDim2.fromOffset(20, 20), Position = UDim2.fromScale(1, 1), AnchorPoint = Vector2.new(1, 1),
 		ZIndex = 10, Parent = self.Main,
+		-- Free resize is a desktop affordance; on touch it only steals swipes.
+		Visible = not IS_MOBILE,
 	})
 	make("Frame", {
 		Size = UDim2.fromOffset(10, 1), Position = UDim2.new(1, -5, 1, -9), AnchorPoint = Vector2.new(1, 0.5),
@@ -1153,7 +1208,19 @@ function Library.new(opts)
 	if opts.Watermark ~= false then self:_buildWatermark(self.Title) end
 	if opts.KeybindHUD ~= false then self:_buildKeybindHUD() end
 
-	if IS_MOBILE then self:_buildMobileIcon() end
+	if IS_MOBILE then
+		self:_buildMobileIcon()
+		-- Rotation, window resize, split view: keep the menu inside the screen.
+		connect(self.Gui:GetPropertyChangedSignal("AbsoluteSize"), function() self:_applyFit() end)
+		-- The topbar inset is not known on the very first frame, so the first fit
+		-- runs with a 0 inset; re-fit once the inset and the viewport are real.
+		connect(GuiService:GetPropertyChangedSignal("TopbarInset"), function() self:_applyFit() end)
+		for _, d in ipairs({ 0.2, 0.6, 1.5, 3 }) do
+			task.delay(d, function()
+				if self.Root and self.Root.Parent then self:_applyFit() end
+			end)
+		end
+	end
 	self:_bindInput()
 	self.Main.Visible = true -- opens through the book animation rather than SetVisible's pop
 	self:_playIntro()
@@ -1190,6 +1257,44 @@ function Library:_uiScale()
 	return a / h
 end
 
+-- Touch layout: the window fills the safe area at scale 1 so text keeps its
+-- native size and nothing is shrunk into illegibility. Desktop keeps the exact
+-- geometry it always had (scale 1, no inset).
+function Library:_applyFit()
+	if not self.Root or not self.Fit then return end
+	if not IS_MOBILE then
+		self.Root.Position = UDim2.fromOffset(0, 0)
+		self.Root.Size = UDim2.fromScale(1, 1)
+		self.Fit.Scale = 1
+		return
+	end
+	local inset = topbarInset()
+	self.Root.Position = UDim2.fromOffset(0, inset)
+	self.Root.Size = UDim2.new(1, 0, 1, -inset)
+	self.Fit.Scale = 1
+	-- The watermark lives outside Root: drop it under the Roblox top bar.
+	if self.WatermarkFrame then
+		self.WatermarkFrame.Position = UDim2.new(1, -20, 0, inset + 10)
+	end
+	if self.MobileFit == false then return end
+	-- PreviewViewport lets a desktop build render exactly what a phone renders.
+	local vp = self.PreviewViewport or viewportSize(self.Gui)
+	if typeof(vp) ~= "Vector2" then vp = Vector2.new(vp.X or 0, vp.Y or 0) end
+	if vp.X < 50 or vp.Y < 50 then
+		-- The viewport is not measured yet: try again on the next frames.
+		task.delay(0.1, function()
+			if self.Root and self.Root.Parent then self:_applyFit() end
+		end)
+		return
+	end
+	local margin = 8
+	local w = math.max(math.floor(vp.X - margin * 2), 320)
+	local h = math.max(math.floor(vp.Y - inset - margin * 2), 220)
+	if math.abs(self.Main.Size.X.Offset - w) > 1 or math.abs(self.Main.Size.Y.Offset - h) > 1 then
+		self.Main.Size = UDim2.fromOffset(w, h)
+		self.Main.Position = UDim2.new(0.5, 0, 0.5, 0)
+	end
+end
 -- Sizes the tab list around the pinned tabs at the bottom of the rail.
 function Library:_layoutRail()
 	local n = self._pinnedCount
@@ -2054,6 +2159,8 @@ function Library:SetVisible(v)
 	if v then
 		self.Main.Visible = true
 		self.Scale.Scale = 0.96
+		-- Re-fit on open: the screen may have rotated while hidden.
+		if IS_MOBILE then pcall(function() self:_applyFit() end) end
 		tween(self.Scale, {Scale = 1}, SLIDE)
 		if self.MobileIcon then self.MobileIcon.Visible = false end
 		if self.BrandMark then self:_animateBrandMark() end
