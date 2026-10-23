@@ -8,7 +8,10 @@
 	  - Rail with tinted tab icons, a gliding active marker, pinned Settings/Config
 	  - Controls on ruled rows: capsule toggles, ruler sliders, dropdowns, pickers
 	  - Watermark, keybinds HUD, toasts, Ctrl+K search, mobile reopen button
+	  - Free mouse while the menu is open: the game can't lock or click with it (Settings)
 	  - File-backed JSON configs with auto-save and autoload
+	  - What's New card once per update: Library.new{Version = "1.0.1", Changelog = {...}}
+	  - Skin picker, gallery, hero, viewport, player list, side panels, tooltips, dependent controls
 	  - Clean unload and service signal tracking (Library.Connect)
 	==============================================================================
 ]]
@@ -131,32 +134,200 @@ local function fontFace(name, weight, style)
 	if not ok or not base then base = Font.fromEnum(Enum.Font.GothamMedium) end
 	return Font.new(base.Family, weight or Enum.FontWeight.Regular, style or Enum.FontStyle.Normal)
 end
-local FONTS = {
-	Brand       = fontFace("Fondamento"),
-	Heading     = fontFace("Merriweather"),
-	HeadingBold = fontFace("Merriweather", Enum.FontWeight.Bold),
-	Italic      = fontFace("Merriweather", Enum.FontWeight.Regular, Enum.FontStyle.Italic),
-	Body        = fontFace("JosefinSans"),
-	BodySemi    = fontFace("JosefinSans", Enum.FontWeight.SemiBold),
-	Mono        = fontFace("RobotoMono"),
-	Symbol      = Font.fromEnum(Enum.Font.GothamBold),
+-- ---------------------------------------------------------------------------
+-- FILES: Glider keeps its folders as they are, so scripts that read and write them directly keep working:
+--   <Folder>/        a script's configs and its own files (Library.new{Folder = "Glider_<Game>"})
+--   Glider_Global/   menu preferences shared by every script, plus cached fonts and sounds
+-- ---------------------------------------------------------------------------
+local HUB_GLOBAL = "Glider_Global"
+local FS_DIRS = type(isfolder) == "function" and type(makefolder) == "function"
+-- makes every level of a path that doesn't exist yet
+local function hubDir(path)
+	if not FS_DIRS then return end
+	local at = ""
+	for part in tostring(path):gmatch("[^/]+") do
+		at = at == "" and part or (at .. "/" .. part)
+		if not isfolder(at) then makefolder(at) end
+	end
+end
+local function hubPath(name)
+	name = tostring(name or "")
+	if name == "" then name = "Glider_Configs" end
+	return name
+end
+local function hubGlobal()
+	pcall(hubDir, HUB_GLOBAL)
+	return HUB_GLOBAL
+end
+
+-- A theme picks a font set (theme.Fonts, Default when unset). Text keeps its role (Body, Heading, ...),
+-- so switching theme swaps every face in place; within one set no two roles may share a face, since a
+-- label's role is read back from the face it shows. Scale shrinks a role's text sizes for wide faces.
+local FONT_SETS = {
+	Default = {
+		Brand       = fontFace("Fondamento"),
+		Heading     = fontFace("Merriweather"),
+		HeadingBold = fontFace("Merriweather", Enum.FontWeight.Bold),
+		Italic      = fontFace("Merriweather", Enum.FontWeight.Regular, Enum.FontStyle.Italic),
+		Body        = fontFace("JosefinSans"),
+		BodySemi    = fontFace("JosefinSans", Enum.FontWeight.SemiBold),
+		Mono        = fontFace("RobotoMono"),
+		Symbol      = Font.fromEnum(Enum.Font.GothamBold),
+	},
 }
+local FONTS = table.clone(FONT_SETS.Default)
+local FONT_SCALE = {}
+local FONT_SET_NAME = "Default"
+
+-- Custom faces ship inside this file (base64 .ttf). The first time a theme needs one it is written to
+-- the global folder with a one-face family file next to it, and loaded with getcustomasset.
+local CUSTOM_SLOTS = {{"Regular", 400, "normal"}}
+local CUSTOM_FONTS = {}
+local CUSTOM_LOADED = {}
+local function b64decode(data)
+	local lib = (crypt and (crypt.base64decode or crypt.base64_decode)) or base64_decode or (base64 and base64.decode)
+	if lib then
+		local ok, out = pcall(lib, data)
+		if ok and type(out) == "string" and #out > 0 then return out end
+	end
+	local alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	local map = {}
+	for i = 1, 64 do map[alphabet:sub(i, i)] = i - 1 end
+	local out, bits, n = {}, 0, 0
+	for c in data:gmatch("[^=]") do
+		local v = map[c]
+		if v then
+			bits, n = bits * 64 + v, n + 6
+			if n >= 8 then
+				n -= 8
+				local b = math.floor(bits / 2 ^ n)
+				table.insert(out, string.char(b))
+				bits -= b * 2 ^ n
+			end
+		end
+	end
+	return table.concat(out)
+end
+-- the family asset for a custom font, or nil when it can't be loaded here
+local function customFamily(name)
+	if CUSTOM_LOADED[name] ~= nil then return CUSTOM_LOADED[name] or nil end
+	local spec = CUSTOM_FONTS[name]
+	local family
+	local canWrite = type(writefile) == "function" and type(isfolder) == "function" and type(makefolder) == "function"
+	if spec and canWrite and type(getcustomasset) == "function" then
+		local ok, res = pcall(function()
+			local dir = hubGlobal() .. "/fonts"
+			hubDir(dir)
+			local bytes = b64decode(spec.Data)
+			local ttf = dir .. "/" .. name .. ".ttf"
+			if not (isfile and isfile(ttf)) or (readfile and #readfile(ttf) ~= #bytes) then writefile(ttf, bytes) end
+			local asset = getcustomasset(ttf)
+			local faces = {}
+			for _, slot in ipairs(CUSTOM_SLOTS) do
+				table.insert(faces, {name = slot[1], weight = slot[2], style = slot[3], assetId = asset})
+			end
+			local json = dir .. "/" .. name .. ".json"
+			writefile(json, game:GetService("HttpService"):JSONEncode({name = name, faces = faces}))
+			return getcustomasset(json)
+		end)
+		if ok and type(res) == "string" and res ~= "" then family = res end
+	end
+	CUSTOM_LOADED[name] = family or false
+	return family
+end
+-- a set entry {Custom = name, Weight, Style} as a Font: the custom family, or its fallback family
+local function customFace(e)
+	local w, st = e.Weight or Enum.FontWeight.Regular, e.Style or Enum.FontStyle.Normal
+	local family = customFamily(e.Custom)
+	if family then return Font.new(family, w, st) end
+	local spec = CUSTOM_FONTS[e.Custom]
+	return fontFace(spec and spec.Fallback or "GothamMedium", w, st)
+end
+
+local function fontKey(f)
+	return typeof(f) == "Font" and (tostring(f.Family) .. "|" .. tostring(f.Weight) .. "|" .. tostring(f.Style)) or nil
+end
+-- Makes `name` the live font set. With a root, every text object under it that shows one of the old
+-- set's faces gets the matching face of the new set (and its size rescaled where a role is scaled).
+local function applyFontSet(name, root)
+	local set = FONT_SETS[name] and name or "Default"
+	if set == FONT_SET_NAME then return end
+	local byKey = {}
+	for role, f in pairs(FONTS) do
+		local k = fontKey(f)
+		if k then byKey[k] = role end
+	end
+	local oldScale = FONT_SCALE
+	for role, f in pairs(FONT_SETS[set]) do
+		if role ~= "Scale" then FONTS[role] = type(f) == "table" and customFace(f) or f end
+	end
+	FONT_SCALE = FONT_SETS[set].Scale or {}
+	FONT_SET_NAME = set
+	if not root then return end
+	for _, d in ipairs(root:GetDescendants()) do
+		if d:IsA("TextLabel") or d:IsA("TextButton") or d:IsA("TextBox") then
+			local role = byKey[fontKey(d.FontFace)]
+			if role then
+				d.FontFace = FONTS[role]
+				local o, n = oldScale[role] or 1, FONT_SCALE[role] or 1
+				if o ~= n and not d.TextScaled then d.TextSize = math.max(1, math.round(d.TextSize / o * n)) end
+			end
+		end
+	end
+end
 
 -- ---------------------------------------------------------------------------
 -- SOUND FX SYSTEM
 -- ---------------------------------------------------------------------------
 local SOUNDS = {
 	Click   = "rbxassetid://6895079853",
+	Tab     = "rbxassetid://6895079853",
 	Toggle  = "rbxassetid://6895079853",
 	Slide   = "rbxassetid://9114223175",
 	Notify  = "rbxassetid://6895079853",
 	Popup   = "rbxassetid://9114223175",
 }
 
+-- A theme can bring its own sounds (theme.Sounds names a set): short .ogg clips embedded here,
+-- written to the global folder the first time and played with getcustomasset. A sound the set
+-- doesn't have uses the default above. Slider ticks only play for a set that has one.
+local SOUND_SETS = {}
+local EMBEDDED_SOUNDS = {}
+local SOUND_LOADED = {}
+local function embeddedSound(name)
+	if SOUND_LOADED[name] ~= nil then return SOUND_LOADED[name] or nil end
+	local id
+	local canWrite = type(writefile) == "function" and type(isfolder) == "function" and type(makefolder) == "function"
+	if EMBEDDED_SOUNDS[name] and canWrite and type(getcustomasset) == "function" then
+		local ok, res = pcall(function()
+			local dir = hubGlobal() .. "/sounds"
+			hubDir(dir)
+			local bytes = b64decode(EMBEDDED_SOUNDS[name])
+			local path = dir .. "/" .. name .. ".ogg"
+			if not (isfile and isfile(path)) or (readfile and #readfile(path) ~= #bytes) then writefile(path, bytes) end
+			return getcustomasset(path)
+		end)
+		if ok and type(res) == "string" and res ~= "" then id = res end
+	end
+	SOUND_LOADED[name] = id or false
+	return id
+end
+-- the current theme's own sound for a key, or nil
+local function themeSound(key)
+	local set = CURRENT_THEME.Sounds and SOUND_SETS[CURRENT_THEME.Sounds]
+	return set and set[key] and embeddedSound(set[key]) or nil
+end
+
 local SoundEnabled = true
+local NOTIFY_GAP = 2 -- a game spamming notifications shouldn't spam their sound
+local lastNotifySound = -math.huge
 local function playSound(soundKey)
 	if not SoundEnabled then return end
-	local soundId = SOUNDS[soundKey] or soundKey
+	if soundKey == "Notify" then
+		if os.clock() - lastNotifySound < NOTIFY_GAP then return end
+		lastNotifySound = os.clock()
+	end
+	local soundId = themeSound(soundKey) or SOUNDS[soundKey] or soundKey
 	task.spawn(function()
 		pcall(function()
 			local s = Instance.new("Sound")
@@ -278,6 +449,11 @@ local function create(class, props, children)
 	for k, v in pairs(props) do
 		if k ~= "Parent" then obj[k] = v end
 	end
+	if props.FontFace and props.TextSize and next(FONT_SCALE) then
+		for role, sc in pairs(FONT_SCALE) do
+			if props.FontFace == FONTS[role] then obj.TextSize = math.max(1, math.round(props.TextSize * sc)) end
+		end
+	end
 	for _, c in ipairs(children or {}) do c.Parent = obj end
 	obj.Parent = props.Parent
 	return obj
@@ -343,6 +519,22 @@ local function track(s)
 		table.insert(words, table.concat(chars, " "))
 	end
 	return table.concat(words, "   ")
+end
+
+-- A "v" chevron drawn from two short bars, so it never depends on a font having the glyph.
+-- props: Size, Position, AnchorPoint, Parent, ZIndex. Rotate the returned frame to point it.
+local function drawnChevron(props)
+	local holder = create("Frame", {BackgroundTransparency = 1, BorderSizePixel = 0})
+	for k, v in pairs(props) do if k ~= "Parent" then holder[k] = v end end
+	for i, side in ipairs({-1, 1}) do
+		make("Frame", {
+			Name = i == 1 and "Left" or "Right", BorderSizePixel = 0, Size = UDim2.fromOffset(6, 2),
+			AnchorPoint = Vector2.new(0.5, 0.5), Position = UDim2.new(0.5, side * 2, 0.5, 0),
+			Rotation = -side * 45, ZIndex = props.ZIndex or 1, Parent = holder,
+		}, {BackgroundColor3 = "SubText"}, {corner(1)})
+	end
+	holder.Parent = props.Parent
+	return holder
 end
 
 local ROMAN = {{1000, "M"}, {900, "CM"}, {500, "D"}, {400, "CD"}, {100, "C"}, {90, "XC"},
@@ -423,9 +615,45 @@ local function capsule(parent, position)
 	return trackF, show
 end
 
+-- A bind key is an Enum.KeyCode (keyboard, gamepad and the mouse key codes) or, for the mouse buttons
+-- Roblox only reports as an input type, Enum.UserInputType.MouseButton2/3. Saved by .Name either way.
+local MOUSE_KEYS = {MouseButton1 = true, MouseButton2 = true, MouseButton3 = true}
 local function toKeyCode(name)
+	if typeof(name) ~= "string" then return nil end
+	if MOUSE_KEYS[name] then return Enum.UserInputType[name] end
 	local ok, key = pcall(function() return Enum.KeyCode[name] end)
 	return ok and key or nil
+end
+-- the bind key an input event is for, or nil (mouse movement, wheel...). Roblox only reports mouse
+-- buttons 1-3, so side buttons (mouse 4 / 5) can't be bound.
+local function inputKey(input)
+	if input.KeyCode ~= Enum.KeyCode.Unknown then return input.KeyCode end
+	if MOUSE_KEYS[input.UserInputType.Name] then return input.UserInputType end
+	-- a keyboard key Roblox has no code for (some layout keys, e.g. the ISO "<" key on a few layouts):
+	-- still bindable, as one shared "Other key"
+	if input.UserInputType == Enum.UserInputType.Keyboard then return Enum.KeyCode.Unknown end
+	return nil
+end
+local KEY_LABELS = {
+	MouseButton1 = "Mouse 1", MouseButton2 = "Mouse 2", MouseButton3 = "Mouse 3",
+	MouseLeftButton = "Mouse 1", MouseRightButton = "Mouse 2", MouseMiddleButton = "Mouse 3", MouseBackButton = "Mouse 4",
+}
+local function keyLabel(key)
+	if not key then return "—" end
+	if KEY_LABELS[key.Name] then return KEY_LABELS[key.Name] end
+	if key == Enum.KeyCode.Unknown then return "Other key" end
+	if key.EnumType == Enum.KeyCode then
+		-- symbols, digits and layout letters show as the character the keyboard prints ("<", "1", "ö")
+		local ok, str = pcall(UIS.GetStringForKeyCode, UIS, key)
+		if ok and typeof(str) == "string" and utf8.len(str) == 1 and not str:match("^%s$") then
+			return str:upper()
+		end
+		if key.Name:match("^World%d+$") then
+			local okc, ch = pcall(utf8.char, key.Value)
+			if okc then return ch end
+		end
+	end
+	return key.Name
 end
 local function toHex(c)
 	return ("#%02X%02X%02X"):format(math.floor(c.R * 255 + 0.5), math.floor(c.G * 255 + 0.5), math.floor(c.B * 255 + 0.5))
@@ -504,16 +732,16 @@ end
 local HAS_FS = type(writefile) == "function" and type(readfile) == "function" and type(isfile) == "function"
 	and type(listfiles) == "function" and type(isfolder) == "function" and type(makefolder) == "function" and type(delfile) == "function"
 
-local Storage = {_mem = {}, _global = {}, Folder = "Glider_Configs"}
+local Storage = {_mem = {}, _global = {}, Folder = hubPath(nil)}
 local function safeName(name) return (tostring(name):gsub("[^%w%-_%. ]", "")) end
 local function configPath(name) return Storage.Folder .. "/configs/" .. safeName(name) .. ".json" end
 
+-- opts.Folder names the game ("FeatherHub_Rivals"); its files go to FeatherHub/Rivals, and a folder of that
 function Storage.init(folder)
-	Storage.Folder = folder or Storage.Folder
+	Storage.Folder = hubPath(folder)
 	if not HAS_FS then return end
 	pcall(function()
-		if not isfolder(Storage.Folder) then makefolder(Storage.Folder) end
-		if not isfolder(Storage.Folder .. "/configs") then makefolder(Storage.Folder .. "/configs") end
+		hubDir(Storage.Folder .. "/configs")
 	end)
 end
 function Storage.list()
@@ -574,7 +802,7 @@ function Storage.getAutosave()
 		local ok, n = pcall(function()
 			local p = Storage.Folder .. "/autosave.txt"
 			if isfile(p) then return readfile(p) end
-			local gp = GLOBAL_DIR .. "/autosave.txt"
+			local gp = hubGlobal() .. "/autosave.txt"
 			if isfile(gp) then return readfile(gp) end
 			return nil
 		end)
@@ -589,8 +817,7 @@ function Storage.setAutosave(enabled)
 			local val = enabled and "1" or "0"
 			if not isfolder(Storage.Folder) then makefolder(Storage.Folder) end
 			writefile(Storage.Folder .. "/autosave.txt", val)
-			if not isfolder(GLOBAL_DIR) then makefolder(GLOBAL_DIR) end
-			writefile(GLOBAL_DIR .. "/autosave.txt", val)
+			writefile(hubGlobal() .. "/autosave.txt", val)
 		end)
 	else
 		Storage._autosave = enabled
@@ -599,12 +826,10 @@ end
 
 -- Global preferences (menu key, theme) live outside any config so they persist
 -- across games and config loads.
-local GLOBAL_DIR = "Glider_Global"
 local function writeGlobal(file, value)
 	if HAS_FS then
 		pcall(function()
-			if not isfolder(GLOBAL_DIR) then makefolder(GLOBAL_DIR) end
-			writefile(GLOBAL_DIR .. "/" .. file, value)
+			writefile(hubGlobal() .. "/" .. file, value)
 		end)
 	else
 		Storage._global[file] = value
@@ -612,7 +837,7 @@ local function writeGlobal(file, value)
 end
 local function readGlobal(file)
 	if HAS_FS then
-		local ok, n = pcall(function() local p = GLOBAL_DIR .. "/" .. file; return isfile(p) and readfile(p) or nil end)
+		local ok, n = pcall(function() local p = hubGlobal() .. "/" .. file; return isfile(p) and readfile(p) or nil end)
 		if ok and n and n ~= "" then return n end
 		return nil
 	end
@@ -622,25 +847,32 @@ function Storage.saveMenuKey(name) writeGlobal("menukey.txt", name) end
 function Storage.loadMenuKey() return readGlobal("menukey.txt") end
 function Storage.saveTheme(name) writeGlobal("theme.txt", name) end
 function Storage.loadTheme() return readGlobal("theme.txt") end
-function Storage.saveHideName(on) writeGlobal("hidename.txt", on and "1" or "0") end
-function Storage.loadHideName()
-	local v = readGlobal("hidename.txt")
-	if v == nil then return nil end
+-- On/off preferences from the Settings tab, one file each holding "1" or "0".
+local PREF_FILES = {
+	HideUsername = "hidename.txt", SoundFX = "soundfx.txt",
+	ShowWatermark = "watermark.txt", ShowKeybindHUD = "keyhud.txt", FpsCap = "fpscap.txt",
+	FreeMouse = "freemouse.txt", AntiAfk = "antiafk.txt",
+}
+function Storage.savePref(flag, on) writeGlobal(PREF_FILES[flag], on and "1" or "0") end
+-- Returns default when the preference was never saved.
+function Storage.loadPref(flag, default)
+	local v = readGlobal(PREF_FILES[flag])
+	if v == nil then return default end
 	return v == "1"
 end
-local function loadBit(file)
-	local v = readGlobal(file)
-	if v == nil then return nil end
-	return v == "1"
-end
-function Storage.saveSoundFX(on) writeGlobal("soundfx.txt", on and "1" or "0") end
-function Storage.loadSoundFX() return loadBit("soundfx.txt") end
-function Storage.saveWatermark(on) writeGlobal("watermark.txt", on and "1" or "0") end
-function Storage.loadWatermark() return loadBit("watermark.txt") end
-function Storage.saveKeyHUD(on) writeGlobal("keyhud.txt", on and "1" or "0") end
-function Storage.loadKeyHUD() return loadBit("keyhud.txt") end
-function Storage.saveAntiAfk(on) writeGlobal("antiafk.txt", on and "1" or "0") end
-function Storage.loadAntiAfk() return loadBit("antiafk.txt") end
+function Storage.saveHideName(on) Storage.savePref("HideUsername", on) end
+function Storage.loadHideName() return Storage.loadPref("HideUsername") end
+function Storage.saveSoundFX(on) Storage.savePref("SoundFX", on) end
+function Storage.loadSoundFX() return Storage.loadPref("SoundFX") end
+function Storage.saveWatermark(on) Storage.savePref("ShowWatermark", on) end
+function Storage.loadWatermark() return Storage.loadPref("ShowWatermark") end
+function Storage.saveKeyHUD(on) Storage.savePref("ShowKeybindHUD", on) end
+function Storage.loadKeyHUD() return Storage.loadPref("ShowKeybindHUD") end
+-- The FPS cap's number lives in its own file.
+function Storage.saveFpsCap(n) writeGlobal("fpscapvalue.txt", tostring(n)) end
+function Storage.loadFpsCap() return tonumber(readGlobal("fpscapvalue.txt") or "") end
+function Storage.saveAntiAfk(on) Storage.savePref("AntiAfk", on) end
+function Storage.loadAntiAfk() return Storage.loadPref("AntiAfk") end
 function Storage.saveWindowSize(w, h)
 	if type(w) == "number" and type(h) == "number" then
 		local data = HttpService:JSONEncode({ Width = math.floor(w), Height = math.floor(h) })
@@ -671,9 +903,82 @@ function Storage.loadWindowSize()
 	return nil
 end
 
+-- The script version this user last ran, kept in the script's own folder (Folder/version.txt).
+-- A newer Version than this one shows What's New once.
+function Storage.saveSeenVersion(v)
+	if HAS_FS then pcall(writefile, Storage.Folder .. "/version.txt", tostring(v)) else Storage._seenVersion = tostring(v) end
+end
+function Storage.loadSeenVersion()
+	if HAS_FS then
+		local ok, v = pcall(function() local p = Storage.Folder .. "/version.txt"; return isfile(p) and readfile(p) or nil end)
+		if ok and v and v ~= "" then return v end
+		return nil
+	end
+	return Storage._seenVersion
+end
+
+-- ---------------------------------------------------------------------------
+-- VERSIONS (What's New)
+-- ---------------------------------------------------------------------------
+-- "v1.0.10" > "1.0.9": compares the numbers part by part, a missing part counting as 0.
+local function versionParts(v)
+	local parts = {}
+	for n in tostring(v or ""):gmatch("%d+") do table.insert(parts, tonumber(n)) end
+	return parts
+end
+local function compareVersions(a, b)
+	local pa, pb = versionParts(a), versionParts(b)
+	for i = 1, math.max(#pa, #pb) do
+		local x, y = pa[i] or 0, pb[i] or 0
+		if x ~= y then return x < y and -1 or 1 end
+	end
+	return 0
+end
+local function versionText(v)
+	return "v" .. (tostring(v):gsub("^%s*[vV]", ""))
+end
+-- The changelog entries newer than `after` (nil: from the first) and up to `upto`, newest first.
+local function changesBetween(changelog, after, upto)
+	local out = {}
+	for _, entry in ipairs(changelog or {}) do
+		if type(entry) == "table" and entry.Version ~= nil
+			and (after == nil or compareVersions(entry.Version, after) > 0)
+			and compareVersions(entry.Version, upto) <= 0 then
+			table.insert(out, entry)
+		end
+	end
+	table.sort(out, function(a, b) return compareVersions(a.Version, b.Version) > 0 end)
+	return out
+end
+local function newestVersion(changelog)
+	local best
+	for _, entry in ipairs(changelog or {}) do
+		if type(entry) == "table" and entry.Version ~= nil and (best == nil or compareVersions(entry.Version, best) > 0) then
+			best = entry.Version
+		end
+	end
+	return best and tostring(best) or nil
+end
+
 -- Settings flags that are global preferences, not part of any config: configs never
 -- save, load or reset them, and Unload leaves them alone.
-local GLOBAL_FLAGS = {MenuKey = true, HideUsername = true, SoundFX = true, ShowWatermark = true, ShowKeybindHUD = true, AntiAfk = true}
+local GLOBAL_FLAGS = {
+	MenuKey = true, HideUsername = true, SoundFX = true, ShowWatermark = true, ShowKeybindHUD = true,
+	FpsCap = true, FpsCapValue = true, FreeMouse = true, AntiAfk = true,
+}
+
+-- ---------------------------------------------------------------------------
+-- FPS CAP (Settings > Performance), through the executor's setfpscap where it exists
+-- ---------------------------------------------------------------------------
+local FPS_MIN, FPS_MAX, FPS_DEFAULT = 30, 1000, 144
+-- The cap in place before the menu changed it: getfpscap() where the executor has it, else Roblox's 60.
+local function currentFpsCap()
+	if type(getfpscap) == "function" then
+		local ok, v = pcall(getfpscap)
+		if ok and type(v) == "number" then return v end
+	end
+	return 60
+end
 
 -- ---------------------------------------------------------------------------
 -- LIBRARY CORE
@@ -717,8 +1022,41 @@ local Library = {
 	},
 }
 Library.__index = Library
+-- a script's own folder (made if missing): Library.HubFolder("Glider_Rivals") -> "Glider_Rivals"
+function Library.HubFolder(name)
+	local path = hubPath(name)
+	pcall(hubDir, path)
+	return path
+end
 local Tab = {}
 Tab.__index = Tab
+
+-- ---------------------------------------------------------------------------
+-- EXECUTOR SUPPORT
+-- Executors Feather doesn't support (their sUNC results are too low for the scripts' hooks to hold up)
+-- get a warning: a modal at load that waits five seconds for "I understand", and a line at the top of
+-- Settings and Config. Nothing is probed or locked; features are left as they are.
+-- ---------------------------------------------------------------------------
+local Executor = {Name = "Unknown", Version = "", Unsupported = false}
+Library.Executor = Executor
+local UNSUPPORTED_EXECUTORS = {"xeno", "solara"}
+do
+	local ok, n, ver = pcall(function() return identifyexecutor() end)
+	if ok and type(n) == "string" and n ~= "" then
+		Executor.Name = n
+		Executor.Version = type(ver) == "string" and ver or ""
+	end
+	local lname = string.lower(Executor.Name)
+	for _, key in ipairs(UNSUPPORTED_EXECUTORS) do
+		if string.find(lname, key, 1, true) then Executor.Unsupported = true end
+	end
+end
+function Executor.label()
+	local who = Executor.Name
+	if Executor.Version ~= "" then who = who .. " " .. Executor.Version end
+	return who
+end
+Executor.Message = "Your executor is unsupported. Some features will not work."
 
 local PAD = 14 -- inner left/right padding of a row
 
@@ -863,6 +1201,8 @@ function Library.new(opts)
 	local themeName = (saved and THEMES[saved] and saved) or (opts.Theme and THEMES[opts.Theme] and opts.Theme) or "Sakura"
 	CURRENT_THEME = THEMES[themeName]
 	Library.Theme = CURRENT_THEME
+	applyFontSet(CURRENT_THEME.Fonts or "Default")
+	local changelog = type(opts.Changelog) == "table" and opts.Changelog or nil
 
 	local self = setmetatable({
 		Tabs = {},
@@ -874,6 +1214,9 @@ function Library.new(opts)
 		Logo = opts.Logo,
 		LogoTint = opts.LogoTint,
 		ThemeName = themeName,
+		Version = opts.Version ~= nil and tostring(opts.Version) or newestVersion(changelog),
+		Changelog = changelog,
+		_visibilityCallbacks = {},
 		_marks = {},
 		_unloadCallbacks = {},
 		_themeSubscribers = {},
@@ -899,13 +1242,33 @@ function Library.new(opts)
 	do
 		local savedKey = Storage.loadMenuKey()
 		if savedKey then
-			local ok, kc = pcall(function() return Enum.KeyCode[savedKey] end)
-			if ok and typeof(kc) == "EnumItem" then Library.MenuKey = kc end
+			local kc = toKeyCode(savedKey)
+			if typeof(kc) == "EnumItem" then Library.MenuKey = kc end
 		end
 	end
 
 	Library._window = self
 	Storage.init(opts.Folder)
+	self.Folder = Storage.Folder
+
+	-- What's New: the first run shows the current version's notes, then a Version newer than the one this
+	-- user last ran queues the notes since then; both open after the intro. The same version again, or one
+	-- with nothing written up, stays quiet. Without file functions nothing is remembered, so the first-run
+	-- card is skipped there rather than shown on every launch.
+	if self.Version then
+		local seen = Storage.loadSeenVersion()
+		local pending
+		if seen then
+			pending = compareVersions(seen, self.Version) < 0 and changesBetween(changelog, seen, self.Version)
+		elseif HAS_FS then
+			pending = {changesBetween(changelog, nil, self.Version)[1]}
+		end
+		if pending and #pending > 0 then
+			self._pendingChanges = pending
+		else
+			Storage.saveSeenVersion(self.Version)
+		end
+	end
 
 	local savedAutoSave = Storage.getAutosave()
 	if savedAutoSave ~= nil then
@@ -921,19 +1284,18 @@ function Library.new(opts)
 		self.ActiveConfig = "default"
 	end
 
-	local hideSaved = Storage.loadHideName()
-	if hideSaved ~= nil then self.HideUsername = hideSaved else self.HideUsername = opts.HideUsername == true end
 	-- Global settings: always persist, independent of configs/autosave.
-	self.SoundFXOn = true
-	local sfxSaved = Storage.loadSoundFX()
-	if sfxSaved ~= nil then self.SoundFXOn = sfxSaved end
-	SoundEnabled = self.SoundFXOn
-	self.ShowWatermark = true
-	local swmSaved = Storage.loadWatermark()
-	if swmSaved ~= nil then self.ShowWatermark = swmSaved end
-	self.ShowKeybindHUD = true
-	local hudSaved = Storage.loadKeyHUD()
-	if hudSaved ~= nil then self.ShowKeybindHUD = hudSaved end
+	self.HideUsername = Storage.loadPref("HideUsername", opts.HideUsername == true)
+	SoundEnabled = Storage.loadPref("SoundFX", true)
+	self.SoundFXOn = SoundEnabled
+	self._wmEnabled = Storage.loadPref("ShowWatermark", true)
+	self.ShowWatermark = self._wmEnabled
+	self._hudEnabled = Storage.loadPref("ShowKeybindHUD", true)
+	self.ShowKeybindHUD = self._hudEnabled
+	self._fpsEnabled = Storage.loadPref("FpsCap", false)
+	self._freeMouse = Storage.loadPref("FreeMouse", opts.FreeMouse ~= false)
+	self._fpsValue = math.clamp(Storage.loadFpsCap() or FPS_DEFAULT, FPS_MIN, FPS_MAX)
+	self:_applyFpsCap()
 	-- Anti-AFK is a global preference too, on by default.
 	self.AntiAfkEnabled = true
 	local antiAfkSaved = Storage.loadAntiAfk()
@@ -951,10 +1313,28 @@ function Library.new(opts)
 	})
 	self.Gui.Parent = guiParent(self.Gui)
 
+	-- Free-mouse shield: full-screen and invisible, under everything else in this Gui. While the
+	-- menu is open it catches clicks meant for the world and, being Modal, releases first-person
+	-- mouse lock (see _applyFreeMouse).
+	self.MouseShield = create("TextButton", {
+		Name = "MouseShield", Text = "", AutoButtonColor = false, BackgroundTransparency = 1,
+		Selectable = false, Modal = true, Visible = false, ZIndex = 0,
+		Size = UDim2.fromScale(1, 1), Parent = self.Gui,
+	})
+
 	-- Window size persistence (remembers size across executions / games)
 	local savedWinSize = Storage.loadWindowSize()
-	local initW = (savedWinSize and savedWinSize.Width) or opts.Width or 880
-	local initH = (savedWinSize and savedWinSize.Height) or opts.Height or 560
+	-- saved size, else opts.Width/Height (or opts.Size), else 1080 x 616; shrunk to fit small screens
+	local want = typeof(opts.Size) == "Vector2" and opts.Size or Vector2.new(opts.Width or 1080, opts.Height or 616)
+	local initW = (savedWinSize and savedWinSize.Width) or want.X
+	local initH = (savedWinSize and savedWinSize.Height) or want.Y
+	if not (IS_MOBILE or opts.Mobile == true) then
+		local vp = viewportSize(self.Gui)
+		if vp.X > 50 and vp.Y > 50 then
+			initW = math.clamp(initW, 500, math.max(500, math.floor(vp.X * 0.92)))
+			initH = math.clamp(initH, 420, math.max(420, math.floor(vp.Y * 0.88)))
+		end
+	end
 
 	-- Touch layout switches on for phones/tablets, or when it is forced.
 	if opts.Mobile == true then IS_MOBILE = true end
@@ -1117,7 +1497,7 @@ function Library.new(opts)
 	self.SearchBtn = searchBtn
 
 	if not IS_MOBILE then
-		self.KeyChip = keycap(Library.MenuKey.Name, tools, "SubText")
+		self.KeyChip = keycap(keyLabel(Library.MenuKey), tools, "SubText")
 		self.KeyChip.TextSize = 10
 		self.KeyChip.LayoutOrder = 2
 	end
@@ -1238,13 +1618,10 @@ function Library.new(opts)
 	self:_bindInput()
 	self.Main.Visible = true -- opens through the book animation rather than SetVisible's pop
 	self:_playIntro()
+	self:_applyFreeMouse()
 
 	-- Pinned Tabs (Settings, Config & Discord)
-	if opts.Settings ~= false then self:_buildSettingsTab(opts.SettingsName, opts.SettingsIcon) end
-	-- Apply persisted global settings (toggle creation is silent, so enforce here).
-	if self.WatermarkFrame then self.WatermarkFrame.Visible = self.ShowWatermark end
-	self._hudEnabled = self.ShowKeybindHUD
-	pcall(function() self:UpdateKeybindHUD() end)
+	if opts.Settings ~= false then self.SettingsTab = self:_buildSettingsTab(opts.SettingsName, opts.SettingsIcon) end
 	if opts.Config ~= false then self:AddConfigTab(opts.ConfigName, opts.ConfigIcon) end
 	if opts.Discord ~= false then self:AddDiscordTab(opts.DiscordName, opts.DiscordIcon) end
 	self:_refreshConfigStatus()
@@ -1382,6 +1759,7 @@ function Library:_buildWatermark(title)
 		BackgroundTransparency = 0.08,
 		BorderSizePixel = 0,
 		ZIndex = 50,
+		Visible = self._wmEnabled ~= false,
 		Parent = self.Gui,
 	}, {BackgroundColor3 = "ChromeRaised"}, {
 		corner(4), stroke("Edge"), padding(0, 12),
@@ -1406,6 +1784,7 @@ function Library:_buildWatermark(title)
 		})
 	end
 	sep(); self._wmTitle = stat(title, "ChromeText")
+	if self.Version then self._wmVersion = stat(versionText(self.Version), "ChromeSub") end
 	self._wmUserSep = sep(); self._wmUser = stat(LocalPlayer.Name, "ChromeSub")
 	sep(); local fpsLabel = stat("60 fps", "ChromeSub")
 	sep(); local pingLabel = stat("0 ms", "ChromeSub")
@@ -1505,7 +1884,7 @@ function Library:UpdateKeybindHUD()
 			Size = UDim2.new(1, -72, 1, 0), Parent = r,
 		})
 		local keyLabel = label({
-			Text = item.Bind.Key.Name, FontFace = FONTS.Mono, TextSize = 11, Role = "ChromeAccent", TextXAlignment = RIGHT,
+			Text = keyLabel(item.Bind.Key), FontFace = FONTS.Mono, TextSize = 11, Role = "ChromeAccent", TextXAlignment = RIGHT,
 			Size = UDim2.new(0, 40, 1, 0), Position = UDim2.new(1, -44, 0, 0), AnchorPoint = Vector2.new(1, 0), Parent = r,
 		})
 		local modeLabel = label({
@@ -1557,6 +1936,7 @@ function Library:SetTheme(themeNameOrTbl)
 	CURRENT_THEME = newTheme
 	Library.Theme = newTheme
 	self.ThemeName = name
+	pcall(applyFontSet, newTheme.Fonts or "Default", self.Gui)
 
 	for inst, rec in pairs(PAINTED) do
 		if inst.Parent == nil then
@@ -1743,6 +2123,7 @@ function Library:_playIntro()
 			page.Size = UDim2.new(1, -RAIL_W, 1, 0)
 		end
 		pcall(function() cover:Destroy() end)
+		self:_showPendingWhatsNew() -- What's New waits for the menu to be fully open
 	end)
 end
 
@@ -1770,9 +2151,11 @@ end
 local TYPE_NAMES = {
 	Toggle = "toggle", Slider = "slider", Button = "button", Dropdown = "dropdown",
 	MultiDropdown = "multi-select", Textbox = "text", ColorPicker = "color", Keybind = "keybind",
+	SkinPicker = "skins", Chips = "choice",
 }
 
 function Library:OpenSearchModal()
+	if self._execBlocked or self.WhatsNewModal then return end
 	if self.SearchModal then self:CloseSearchModal(true) end
 	local overlay = create("TextButton", {
 		Name = "Search", Text = "", AutoButtonColor = false, Size = UDim2.fromScale(1, 1),
@@ -1833,7 +2216,7 @@ function Library:OpenSearchModal()
 		local items = {}
 		for flag, el in pairs(Library.Elements) do
 			local name = el.Name or flag
-			if q == "" or string.find(string.lower(name), q, 1, true) or string.find(string.lower(flag), q, 1, true) then
+			if not el.Hidden and (q == "" or string.find(string.lower(name), q, 1, true) or string.find(string.lower(flag), q, 1, true)) then
 				table.insert(items, el)
 			end
 		end
@@ -1914,8 +2297,158 @@ function Library:CloseSearchModal(instant)
 end
 
 -- ---------------------------------------------------------------------------
+-- WHAT'S NEW: the changelog card after a script's Version goes up
+-- ---------------------------------------------------------------------------
+-- Changelog entry: {Version = "1.0.1", New = {...}, Improved = {...}, Fixed = {...}, Removed = {...}, Notes = {...}}.
+-- Each list holds plain strings (one string works too); Notes print without a heading.
+local CHANGE_KINDS = {
+	{Key = "New", Title = "New", Role = "Accent"},
+	{Key = "Improved", Title = "Improved", Role = "Warning"},
+	{Key = "Fixed", Title = "Fixed", Role = "Success"},
+	{Key = "Removed", Title = "Removed", Role = "Danger"},
+	{Key = "Notes", Role = "SubText"},
+}
+
+function Library:_showPendingWhatsNew()
+	local pending = self._pendingChanges
+	if not pending or self._execBlocked or self.Unloaded then return end
+	self._pendingChanges = nil
+	self:ShowWhatsNew(pending)
+end
+
+-- entries: changelog entries to show, newest first. Leave it out for the current version's notes.
+function Library:ShowWhatsNew(entries)
+	if self.Unloaded or not self.Version then return end
+	entries = entries or {changesBetween(self.Changelog, nil, self.Version)[1]}
+	if #entries == 0 then return end
+	self:CloseSearchModal(true)
+	self:CloseWhatsNew(true)
+	local overlay = create("TextButton", {
+		Name = "WhatsNew", Text = "", AutoButtonColor = false, Active = true, Size = UDim2.fromScale(1, 1),
+		BackgroundColor3 = Color3.new(0, 0, 0), BackgroundTransparency = 1, ZIndex = 70, Parent = self.Main,
+	}, {corner(6)})
+	self.WhatsNewModal = overlay
+	tween(overlay, {BackgroundTransparency = 0.5})
+	playSound("Popup")
+
+	local box = make("Frame", {
+		Active = true, Size = UDim2.new(1, -60, 0, 0), AutomaticSize = AY, AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromScale(0.5, 0.5), BorderSizePixel = 0, ZIndex = 71, Parent = overlay,
+	}, {BackgroundColor3 = "PageRaised"}, {
+		corner(6), stroke("Rule2"), padding(22, 24), list(10),
+		create("UISizeConstraint", {MaxSize = Vector2.new(440, math.huge)}),
+	})
+	local head = create("Frame", {BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 24), LayoutOrder = 1, ZIndex = 72, Parent = box})
+	label({
+		Text = "What's new", FontFace = FONTS.HeadingBold, TextSize = 18,
+		Size = UDim2.new(1, -90, 1, 0), ZIndex = 72, Parent = head,
+	})
+	label({
+		Text = versionText(self.Version), FontFace = FONTS.Mono, TextSize = 12, Role = "Accent", TextXAlignment = RIGHT,
+		Size = UDim2.new(0, 90, 1, 0), Position = UDim2.fromScale(1, 0), AnchorPoint = Vector2.new(1, 0), ZIndex = 72, Parent = head,
+	})
+	label({
+		Text = track(self.Title), FontFace = FONTS.BodySemi, TextSize = 11, Role = "SubText", TextTruncate = TRUNC,
+		Size = UDim2.new(1, 0, 0, 14), LayoutOrder = 2, ZIndex = 72, Parent = box,
+	})
+	make("Frame", {Size = UDim2.new(1, 0, 0, 1), BorderSizePixel = 0, LayoutOrder = 3, ZIndex = 72, Parent = box}, {BackgroundColor3 = "Rule2"})
+
+	-- The notes scroll once they outgrow the card (kept short enough for the smallest window).
+	local scroll = make("ScrollingFrame", {
+		Size = UDim2.new(1, 0, 0, 0), BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 2,
+		CanvasSize = UDim2.new(), AutomaticCanvasSize = AY, LayoutOrder = 4, ZIndex = 72, Parent = box,
+	}, {ScrollBarImageColor3 = "Rule2"})
+	local body = list(6)
+	body.Parent = scroll
+	local order = 0
+	local function add(obj)
+		order += 1
+		obj.LayoutOrder = order
+		obj.ZIndex = 72
+		obj.Parent = scroll
+		return obj
+	end
+	local function gap(h) add(create("Frame", {BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, h)})) end
+	for i, entry in ipairs(entries) do
+		if #entries > 1 then -- several versions since the last run: each gets its own number
+			if i > 1 then gap(8) end
+			add(label({Text = versionText(entry.Version), FontFace = FONTS.Mono, TextSize = 12, Size = UDim2.new(1, 0, 0, 18)}))
+		end
+		local firstKind = true
+		for _, kind in ipairs(CHANGE_KINDS) do
+			local items = entry[kind.Key]
+			if type(items) == "string" then items = {items} end
+			if type(items) == "table" and #items > 0 then
+				if not firstKind then gap(2) end
+				firstKind = false
+				if kind.Title then
+					add(label({Text = track(kind.Title), FontFace = FONTS.BodySemi, TextSize = 10, Role = kind.Role, Size = UDim2.new(1, 0, 0, 14)}))
+				end
+				for _, item in ipairs(items) do
+					local line = add(create("Frame", {BackgroundTransparency = 1, Size = UDim2.new(1, -6, 0, 0), AutomaticSize = AY}))
+					make("Frame", {Size = UDim2.fromOffset(6, 1), Position = UDim2.fromOffset(2, 9), BorderSizePixel = 0, ZIndex = 72, Parent = line},
+						{BackgroundColor3 = kind.Role})
+					label({
+						Text = tostring(item), TextSize = 14, TextWrapped = true, LineHeight = 1.2,
+						TextYAlignment = Enum.TextYAlignment.Top, Size = UDim2.new(1, -18, 0, 0), AutomaticSize = AY,
+						Position = UDim2.fromOffset(18, 0), ZIndex = 72, Parent = line,
+					})
+				end
+			end
+		end
+	end
+	local maxH = math.clamp(self.Main.Size.Y.Offset - 230, 120, 300)
+	local function fit()
+		local h = body.AbsoluteContentSize.Y / self:_uiScale()
+		scroll.Size = UDim2.new(1, 0, 0, math.min(h, maxH))
+		scroll.ScrollingEnabled = h > maxH
+	end
+	body:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(fit)
+	fit()
+
+	local row = create("Frame", {BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 40), LayoutOrder = 5, ZIndex = 72, Parent = box},
+		{list(0, H, {HorizontalAlignment = Enum.HorizontalAlignment.Right, VerticalAlignment = Enum.VerticalAlignment.Bottom})})
+	local btn = textButton(row, "Got it", "primary")
+	btn.ZIndex = 73
+	btn.MouseButton1Click:Connect(function()
+		playSound("Click")
+		self:CloseWhatsNew()
+	end)
+	overlay.MouseButton1Click:Connect(function() self:CloseWhatsNew() end)
+	self._whatsNewEsc = connect(UIS.InputBegan, function(i)
+		if i.KeyCode == Enum.KeyCode.Escape and self.WhatsNewModal == overlay then self:CloseWhatsNew() end
+	end)
+end
+
+-- Closing the card marks this version as seen, so it shows once per update.
+function Library:CloseWhatsNew(instant)
+	local overlay = self.WhatsNewModal
+	if not overlay then return end
+	self.WhatsNewModal = nil
+	if not self.Unloaded then Storage.saveSeenVersion(self.Version) end
+	if self._whatsNewEsc then
+		pcall(function() self._whatsNewEsc:Disconnect() end)
+		self._whatsNewEsc = nil
+	end
+	if instant then overlay:Destroy() return end
+	for _, c in ipairs(overlay:GetChildren()) do
+		if c:IsA("GuiObject") then c.Visible = false end
+	end
+	tween(overlay, {BackgroundTransparency = 1}, FAST).Completed:Connect(function()
+		overlay:Destroy()
+	end)
+end
+
+-- ---------------------------------------------------------------------------
 -- SETTINGS TAB & CONTROLS
 -- ---------------------------------------------------------------------------
+-- "Executor" at the top of Settings and Config, only on an unsupported executor
+function Library:_executorSection(tab)
+	if not Executor.Unsupported then return end
+	tab:AddSection("Executor")
+	tab:AddLabel(Executor.label() .. ": " .. Executor.Message, {Role = "Warning"})
+end
+
 -- Deletes the remembered choice for the current game (its GliderLoader/remember.json
 -- entry), so the loader shows its menu again instead of auto-launching.
 -- Saved keys are intentionally left alone. Returns 1 when an entry was removed.
@@ -1949,6 +2482,7 @@ end
 function Library:_buildSettingsTab(name, icon)
 	local tab = self:AddTab(name or "Settings", icon or Library.Icons.Settings, true)
 
+	self:_executorSection(tab)
 	tab:AddSection("Theme")
 	local tiles = tab:_block(104)
 	local tileRow = create("Frame", {
@@ -2011,6 +2545,43 @@ function Library:_buildSettingsTab(name, icon)
 		end
 	end)
 
+	-- These switches are global preferences (see GLOBAL_FLAGS): saved outside any config.
+	local function remember(flag, v)
+		if not self.Unloaded then Storage.savePref(flag, v) end
+	end
+
+	tab:AddSection("Performance")
+	local fpsToggle
+	fpsToggle = tab:AddToggle({
+		Name = "FPS Cap",
+		Flag = "FpsCap",
+		Default = self._fpsEnabled,
+		Note = "Only supported executors.",
+		Callback = function(v)
+			if v and type(setfpscap) ~= "function" then
+				fpsToggle:Set(false, true)
+				self:Notify({Title = "FPS Cap", Body = "This executor doesn't support setfpscap.", Type = "Warning"})
+				return
+			end
+			self._fpsEnabled = v
+			remember("FpsCap", v)
+			self:_applyFpsCap()
+		end,
+	})
+	tab:AddSlider({
+		Name = "Max FPS",
+		Flag = "FpsCapValue",
+		Min = FPS_MIN,
+		Max = FPS_MAX,
+		Default = self._fpsValue,
+		CallbackOnRelease = true, -- setfpscap once the slider is let go, not on every step of the drag
+		Callback = function(v)
+			self._fpsValue = v
+			if not self.Unloaded then Storage.saveFpsCap(v) end
+			self:_applyFpsCap()
+		end,
+	})
+
 	tab:AddSection("Menu")
 	tab:AddKeybind({
 		Name = "Open / Close Menu",
@@ -2019,25 +2590,37 @@ function Library:_buildSettingsTab(name, icon)
 		Callback = function(key)
 			if not key then return end
 			self:SetMenuKey(key)
-			self:Notify({Title = "Keybind", Body = "Menu key set to " .. key.Name, Type = "Success"})
+			self:Notify({Title = "Keybind", Body = "Menu key set to " .. keyLabel(key), Type = "Success"})
+		end,
+	})
+	tab:AddToggle({
+		Name = "Free Mouse While Open",
+		Flag = "FreeMouse",
+		Default = self._freeMouse,
+		Note = "The game can't lock or use the mouse while the menu is open.",
+		Callback = function(v)
+			self._freeMouse = v
+			remember("FreeMouse", v)
+			self:_applyFreeMouse()
 		end,
 	})
 	tab:AddToggle({
 		Name = "Sound Effects",
 		Flag = "SoundFX",
-		Default = self.SoundFXOn,
+		Default = SoundEnabled,
 		Callback = function(v)
 			SoundEnabled = v
-			if not self.Unloaded then Storage.saveSoundFX(v) end
+			remember("SoundFX", v)
 		end,
 	})
 	tab:AddToggle({
 		Name = "Watermark",
 		Flag = "ShowWatermark",
-		Default = self.ShowWatermark,
+		Default = self._wmEnabled,
 		Callback = function(v)
+			self._wmEnabled = v
 			if self.WatermarkFrame then self.WatermarkFrame.Visible = v end
-			if not self.Unloaded then Storage.saveWatermark(v) end
+			remember("ShowWatermark", v)
 		end,
 	})
 	tab:AddToggle({
@@ -2046,60 +2629,77 @@ function Library:_buildSettingsTab(name, icon)
 		Default = self.HideUsername,
 		Callback = function(v)
 			self:SetHideUsername(v)
-			if not self.Unloaded then Storage.saveHideName(v) end
+			remember("HideUsername", v)
 		end,
 	})
 	tab:AddToggle({
 		Name = "Keybinds HUD",
 		Flag = "ShowKeybindHUD",
-		Default = self.ShowKeybindHUD,
+		Default = self._hudEnabled,
 		Callback = function(v)
 			self._hudEnabled = v
 			self:UpdateKeybindHUD()
-			if not self.Unloaded then Storage.saveKeyHUD(v) end
+			remember("ShowKeybindHUD", v)
 		end,
 	})
 	tab:AddToggle({
 		Name = "Anti-AFK",
 		Flag = "AntiAfk",
 		Default = self.AntiAfkEnabled ~= false,
-		Callback = function(v)
-			self:SetAntiAfk(v, false)
-			if not self.Unloaded then Storage.saveAntiAfk(v) end
-		end,
+		Note = "Stops Roblox from kicking you after 20 idle minutes.",
+		Callback = function(v) self:SetAntiAfk(v, false) end,
 	})
 	tab:AddSection("Session")
 	tab:AddButton({
 		Name = "Forget this script",
-		Desc = "Forgets a remembered access for this script: clears the saved key and the remembered build, so the loader asks again next time.",
+		Desc = "Clears the saved key and the remembered build, so the loader asks again next time.",
 		Danger = true,
 		Callback = function()
 			local ok, removed = pcall(ForgetLoaderSession)
-				if ok and (removed or 0) > 0 then
-					self:Notify({Title = "Session", Body = "Script forgotten. The loader menu will show again.", Type = "Success"})
-				elseif ok then
-					self:Notify({Title = "Session", Body = "No remembered choice found for this game.", Type = "Info"})
-				else
-					self:Notify({Title = "Session", Body = "Could not access saved files.", Type = "Error"})
-				end
+			if ok and (removed or 0) > 0 then
+				self:Notify({Title = "Session", Body = "Script forgotten. The loader menu will show again.", Type = "Success"})
+			elseif ok then
+				self:Notify({Title = "Session", Body = "No remembered choice found for this game.", Type = "Info"})
+			else
+				self:Notify({Title = "Session", Body = "Could not access saved files.", Type = "Error"})
+			end
 		end,
 	})
-	local unloadRow = tab:AddButton({
+	if self.Version and #changesBetween(self.Changelog, nil, self.Version) > 0 then
+		tab:AddButton({
+			Name = "What's New in " .. versionText(self.Version),
+			Callback = function() self:ShowWhatsNew() end,
+		})
+	end
+	local unload = tab:AddButton({
 		Name = "Unload " .. self.Brand,
 		Danger = true,
 		Callback = function() self:Unload() end,
 	})
-	self._unloadLabel = unloadRow:FindFirstChild("Label")
+	self._unloadLabel = unload.Frame:FindFirstChild("Label")
 	return tab
 end
 
+-- Sets the executor's FPS cap from the Performance settings. Turning the cap off puts back
+-- the one from before the menu first changed it. Returns false when setfpscap is missing.
+function Library:_applyFpsCap()
+	if type(setfpscap) ~= "function" then return false end
+	if self._fpsEnabled then
+		if self._fpsRestore == nil then self._fpsRestore = currentFpsCap() end
+		pcall(setfpscap, self._fpsValue)
+	elseif self._fpsRestore ~= nil then
+		pcall(setfpscap, self._fpsRestore)
+		self._fpsRestore = nil
+	end
+	return true
+end
 
 -- ---------------------------------------------------------------------------
 -- OPEN / CLOSE & VISIBILITY
 -- ---------------------------------------------------------------------------
 function Library:SetMenuKey(key)
 	Library.MenuKey = key
-	if self.KeyChip then self.KeyChip.Text = key.Name end
+	if self.KeyChip then self.KeyChip.Text = keyLabel(key) end
 	Storage.saveMenuKey(key.Name)
 end
 
@@ -2139,6 +2739,30 @@ function Library:SetHideUsername(on)
 	if self._wmUser then self._wmUser.Visible = not self.HideUsername end
 	if self._wmUserSep then self._wmUserSep.Visible = not self.HideUsername end
 end
+
+-- Free mouse (Settings > Menu, on by default, PC only). While the menu is open a full-screen Modal
+-- shield sits under the window: Modal frees a first-person mouse lock natively and the shield takes the
+-- clicks meant for the world. The only other thing touched is the cursor's visibility, switched back on
+-- if the game hides it. Nothing else of the game's mouse or input handling is changed: anti-cheats react
+-- to that (Rivals froze the client in duels when the menu disabled its mouse handlers).
+local FREE_MOUSE_STEP = "UIAPI_FreeMouse"
+function Library:_applyFreeMouse()
+	local want = self._freeMouse == true and self.Visible == true and not self.Unloaded and not IS_MOBILE
+	if self.MouseShield and self.MouseShield.Parent then self.MouseShield.Visible = want end
+	if want == (self._mouseFreed == true) then return end
+	self._mouseFreed = want
+	if want then
+		self._iconPrev = UIS.MouseIconEnabled
+		pcall(function()
+			RunService:BindToRenderStep(FREE_MOUSE_STEP, Enum.RenderPriority.Last.Value + 1, function()
+				if not UIS.MouseIconEnabled then UIS.MouseIconEnabled = true end
+			end)
+		end)
+	else
+		pcall(function() RunService:UnbindFromRenderStep(FREE_MOUSE_STEP) end)
+		if self._iconPrev ~= nil then pcall(function() UIS.MouseIconEnabled = self._iconPrev end) end
+		self._iconPrev = nil
+	end
 
 local brandAnimToken = 0
 function Library:_animateBrandMark()
@@ -2204,10 +2828,16 @@ function Library:_animateBrandMark()
 		end
 	end)
 end
+end
 
 function Library:SetVisible(v)
 	if v == self.Visible and self.Main.Visible == v then return end
+	local changed = v ~= self.Visible
 	self.Visible = v
+	self:_applyFreeMouse()
+	if changed then
+		for _, fn in ipairs(self._visibilityCallbacks) do task.spawn(pcall, fn, v) end
+	end
 	if v then
 		self.Main.Visible = true
 		self.Scale.Scale = 0.96
@@ -2246,7 +2876,7 @@ function Library:SetVisible(v)
 			self.MobileScale.Scale = 0
 			tween(self.MobileScale, {Scale = 1}, SLIDE)
 		else
-			self:Notify({Title = "Menu Hidden", Body = "Press " .. Library.MenuKey.Name .. " to open the menu", Type = "Info", Duration = 2.5})
+			self:Notify({Title = "Menu Hidden", Body = "Press " .. keyLabel(Library.MenuKey) .. " to open the menu", Type = "Info", Duration = 2.5})
 		end
 	end
 end
@@ -2254,6 +2884,13 @@ end
 -- ---------------------------------------------------------------------------
 -- UNLOAD & CLEANUP
 -- ---------------------------------------------------------------------------
+-- fn(open) runs whenever the menu opens or closes, and once right away with the current state.
+-- For game-specific input gating (a game's own "menu is open" switch) in the calling script.
+function Library:OnVisibilityChanged(fn)
+	table.insert(self._visibilityCallbacks, fn)
+	task.spawn(pcall, fn, self.Visible ~= false)
+end
+
 function Library:OnUnload(fn)
 	table.insert(self._unloadCallbacks, fn)
 end
@@ -2261,20 +2898,24 @@ end
 function Library:Unload(instant)
 	if self.Unloaded then return end
 	self.Unloaded = true
-	self._applying = true
+	self:_applyFreeMouse() -- hand the mouse back before anything else goes
 	-- The anti-AFK connection belongs to the menu, so it goes with it.
 	pcall(antiAfkStop)
+	self._applying = true
 	for _, el in pairs(Library.Elements) do
-		if el.Type == "Toggle" and el.Value and not GLOBAL_FLAGS[el.Flag] then pcall(el.Set, el, false) end
+		if el.Type == "Toggle" and el.Value and not GLOBAL_FLAGS[el.Flag] and not el.NoSave then pcall(el.Set, el, false) end
 	end
 	self._applying = false
+	for _, fn in ipairs(self._unloadCallbacks) do pcall(fn) end
 	if self._sidePanels then
 		for _, sp in ipairs(self._sidePanels) do pcall(function() sp:Destroy() end) end
 		table.clear(self._sidePanels)
 	end
-	for _, fn in ipairs(self._unloadCallbacks) do pcall(fn) end
+	-- the game gets its own FPS cap back; the saved setting re-applies on the next load
+	if self._fpsRestore ~= nil then pcall(setfpscap, self._fpsRestore) end
 	for _, c in ipairs(CONNS) do pcall(function() c:Disconnect() end) end
 	table.clear(CONNS)
+	table.clear(Library.Elements) -- a window built after this starts with every name free again
 
 	if getgenv then getgenv()[GLOBAL_KEY] = nil end
 	if not instant and self.Main and self.Scale then
@@ -2324,19 +2965,32 @@ end
 -- ---------------------------------------------------------------------------
 function Library:_bindInput()
 	connect(UIS.InputBegan, function(input, gameProcessed)
-		if input.UserInputType ~= Enum.UserInputType.Keyboard or gameProcessed or self.Listening then return end
-		if input.KeyCode == Library.MenuKey then
-			self:SetVisible(not self.Visible)
+		local key = inputKey(input)
+		if not key or self.Listening then return end
+		-- gameProcessed is also set when a game binds the same input itself (ContextActionService sinks
+		-- it; shooters bind mouse 1-3 to fire / aim / ping), so it can't decide alone. Keys: only a focused
+		-- text box (typing in chat or a field) stops a bind. Mouse buttons: only a click on the menu does.
+		local typing = UIS:GetFocusedTextBox() ~= nil
+		if key == Library.MenuKey then -- the menu key works whatever handled it (a mouse menu key must close it too)
+			if not typing then self:SetVisible(not self.Visible) end
 			return
 		end
+		if gameProcessed then
+			if input.UserInputType == Enum.UserInputType.Keyboard then
+				if typing then return end
+			elseif self.Visible then
+				return -- with the menu open, a click belongs to the menu (and its full-screen shield)
+			end
+		end
 		-- Ctrl+K for search
-		if UIS:IsKeyDown(Enum.KeyCode.LeftControl) and input.KeyCode == Enum.KeyCode.K then
+		local ctrl = UIS:IsKeyDown(Enum.KeyCode.LeftControl) or UIS:IsKeyDown(Enum.KeyCode.RightControl)
+		if ctrl and key == Enum.KeyCode.K then
 			if self.Visible then self:OpenSearchModal() end
 			return
 		end
 		for flag, bind in pairs(Library.Binds) do
 			local el = Library.Elements[flag]
-			if el and bind.Key == input.KeyCode then
+			if el and bind.Key == key then
 				if el.Type == "Toggle" then
 					if bind.Mode == "Toggle" then el:Set(not el.Value)
 					elseif bind.Mode == "Hold" then el:Set(true) end
@@ -2349,10 +3003,11 @@ function Library:_bindInput()
 	end)
 
 	connect(UIS.InputEnded, function(input)
-		if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+		local key = inputKey(input)
+		if not key then return end
 		for flag, bind in pairs(Library.Binds) do
 			local el = Library.Elements[flag]
-			if el and bind.Key == input.KeyCode and bind.Mode == "Hold" then
+			if el and bind.Key == key and bind.Mode == "Hold" then
 				el:Set(false)
 				self:UpdateKeybindHUD()
 			end
@@ -2364,10 +3019,11 @@ function Library:ListenForKey(cb)
 	self.Listening = true
 	local conn
 	conn = UIS.InputBegan:Connect(function(input)
-		if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+		local key = inputKey(input)
+		if not key then return end
 		conn:Disconnect()
 		task.defer(function() self.Listening = false end)
-		cb(input.KeyCode ~= Enum.KeyCode.Escape and input.KeyCode or nil)
+		cb(key ~= Enum.KeyCode.Escape and key or nil)
 	end)
 end
 
@@ -2556,7 +3212,7 @@ function Library:AddTab(name, icon, pinned)
 	})
 
 	tab.Button.MouseButton1Click:Connect(function()
-		playSound("Click")
+		playSound("Tab")
 		self:SelectTab(tab)
 	end)
 	tab.Button.MouseEnter:Connect(function() tab._hover = true; tab._paint(true) end)
@@ -2578,6 +3234,100 @@ function Tab:SetBadge(text)
 	self.Badge.Visible = text ~= nil and text ~= ""
 end
 
+-- ---------------------------------------------------------------------------
+-- SIDE PANEL: a page attached to the window's right edge, as tall as the window.
+--   local panel = Window:AddPanel({
+--     Title = "Chams", Width = 340,
+--     Tab = VisualsTab,      -- only shown while this tab (or sub-tab) is open (omit: every tab)
+--     ShowFlag = "ChamsOn",  -- only shown while this flag is on (omit: always)
+--     Manual = true,         -- hidden until panel:SetOpen(true); gets a close button (OnClose = fn)
+--   })
+--   panel:SetTitle(text) renames it.
+--   panel:AddToggle({...})  -- every Tab:Add* element works on it
+-- It follows the window when dragged and scales with it.
+-- ---------------------------------------------------------------------------
+function Library:AddPanel(opts)
+	opts = opts or {}
+	local GAP, W = 10, opts.Width or 340
+	local panel = setmetatable({Name = opts.Title or "Panel", Window = self, _secCount = 0, IsPanel = true, HostTab = opts.Tab}, Tab)
+	local frame = make("Frame", {
+		Name = "SidePanel", Visible = false, BorderSizePixel = 0, ClipsDescendants = true,
+		Size = UDim2.fromOffset(W, self.Main.Size.Y.Offset), Parent = self.Gui,
+	}, {BackgroundColor3 = "PageBg"}, {corner(6), stroke("Edge")})
+	local scale = create("UIScale", {Scale = 1, Parent = frame})
+	grain(frame, "Text")
+	panel.Frame = frame
+	local head = create("Frame", {BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 52), Parent = frame})
+	local titleLabel = label({
+		Text = panel.Name, FontFace = FONTS.Heading, TextSize = 17, AutomaticSize = AX,
+		Size = UDim2.fromOffset(0, 52), Position = UDim2.fromOffset(18, 0), Parent = head,
+	})
+	function panel:SetTitle(text) titleLabel.Text = tostring(text or "") end
+	-- Manual panels open with panel:SetOpen(true) and get a close button
+	panel.Open = not opts.Manual
+	function panel:SetOpen(v) self.Open = v == true end
+	if opts.Manual then
+		local close = create("TextButton", {
+			Text = "", AutoButtonColor = false, BackgroundTransparency = 1, Size = UDim2.fromOffset(28, 28),
+			Position = UDim2.new(1, -12, 0, 26), AnchorPoint = Vector2.new(1, 0.5), Parent = head,
+		}, {corner(6)})
+		local bars = {}
+		for _, rot in ipairs({45, -45}) do
+			table.insert(bars, make("Frame", {
+				Size = UDim2.fromOffset(13, 2), Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5),
+				Rotation = rot, BorderSizePixel = 0, Parent = close,
+			}, {BackgroundColor3 = "SubText"}))
+		end
+		paint(close, {BackgroundColor3 = "Hover"})
+		close.MouseEnter:Connect(function() tween(close, {BackgroundTransparency = 0.9}) end)
+		close.MouseLeave:Connect(function() tween(close, {BackgroundTransparency = 1}) end)
+		close.MouseButton1Click:Connect(function()
+			playSound("Click")
+			panel:SetOpen(false)
+			if opts.OnClose then pcall(opts.OnClose) end
+		end)
+	end
+	make("Frame", {
+		Size = UDim2.new(1, -36, 0, 1), Position = UDim2.new(0, 18, 1, -1), BorderSizePixel = 0, Parent = head,
+	}, {BackgroundColor3 = "Rule2"})
+	panel.Page = make("ScrollingFrame", {
+		Name = panel.Name, BackgroundTransparency = 1, BorderSizePixel = 0,
+		Size = UDim2.new(1, -24, 1, -62), Position = UDim2.fromOffset(12, 58),
+		ScrollBarThickness = 2, CanvasSize = UDim2.new(), AutomaticCanvasSize = AY,
+		ScrollingDirection = Enum.ScrollingDirection.Y, Parent = frame,
+	}, {ScrollBarImageColor3 = "Rule2"}, {
+		list(0),
+		create("UIPadding", {
+			PaddingLeft = UDim.new(0, 1), PaddingTop = UDim.new(0, 1),
+			PaddingRight = UDim.new(0, 8), PaddingBottom = UDim.new(0, 14),
+		}),
+	})
+
+	-- slides out from behind the window's edge when it opens, tucks back when it closes
+	local shown = 0
+	local conn
+	conn = RunService.RenderStepped:Connect(function(dt)
+		if not frame.Parent then conn:Disconnect() return end
+		local host = panel.HostTab
+		-- a sub-tab host counts only while its parent tab is open on that sub-tab
+		local onHost = not host or (host.IsSubTab and self.CurrentTab == host.ParentTab and host.ParentTab.CurrentSubTab == host)
+			or self.CurrentTab == host
+		local want = self.Visible and self.Main.Visible and onHost and panel.Open
+			and (not opts.ShowFlag or (Library.Flags[opts.ShowFlag] ~= nil and Library.Flags[opts.ShowFlag] ~= false))
+		shown = math.clamp(shown + (want and dt or -dt) * 7, 0, 1)
+		frame.Visible = shown > 0.001
+		if not frame.Visible then return end
+		local k = self:_uiScale() -- the window's size on screen vs its design size, open/close tween included
+		scale.Scale = k
+		frame.Size = UDim2.fromOffset(W, self.Main.Size.Y.Offset)
+		local origin = self.Gui.AbsolutePosition
+		local pos = self.Main.AbsolutePosition - origin
+		local ease = 1 - (1 - shown) ^ 3
+		frame.Position = UDim2.fromOffset(pos.X + self.Main.AbsoluteSize.X + (GAP - 24 * (1 - ease)) * k, pos.Y)
+	end)
+	return panel
+end
+
 function Library:SelectTab(tab)
 	if type(tab) == "string" then
 		for _, t in ipairs(self.Tabs) do
@@ -2588,6 +3338,10 @@ function Library:SelectTab(tab)
 		end
 	end
 	if type(tab) ~= "table" then return end
+	if tab.IsPanel then -- a side panel isn't a page: open the tab it belongs to instead
+		if tab.HostTab then self:SelectTab(tab.HostTab) end
+		return
+	end
 	if tab.IsSubTab then -- a sub-tab lives inside its parent: open the parent, then the sub-tab
 		self:SelectTab(tab.ParentTab)
 		tab.ParentTab:SelectSubTab(tab)
@@ -2599,11 +3353,6 @@ function Library:SelectTab(tab)
 		t.Page.Visible = t == tab
 		t._paint(true)
 	end
-	self.PageTitle.Text = tab.Name
-	self:_syncMarker(prev ~= nil and prev ~= tab)
-	task.defer(function()
-		if self.CurrentTab == tab and not self.Unloaded then self:_syncMarker(false) end
-	end)
 	if self._sidePanels then
 		for _, sp in ipairs(self._sidePanels) do
 			if sp.BoundTab and tab.Name ~= sp.BoundTab and sp.IsOpen then
@@ -2613,6 +3362,11 @@ function Library:SelectTab(tab)
 			end
 		end
 	end
+	self.PageTitle.Text = tab.Name
+	self:_syncMarker(prev ~= nil and prev ~= tab)
+	task.defer(function()
+		if self.CurrentTab == tab and not self.Unloaded then self:_syncMarker(false) end
+	end)
 	if prev and prev ~= tab then
 		self.Veil.BackgroundTransparency = 0
 		tween(self.Veil, {BackgroundTransparency = 1}, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
@@ -2652,7 +3406,10 @@ end
 -- ---------------------------------------------------------------------------
 -- SUB-TABS
 -- ---------------------------------------------------------------------------
-function Tab:AddSubTab(name, icon)
+-- Tab:AddSubTab(name, icon, opts): opts.IconSize = Vector2 for a wide icon (e.g. a weapon picture,
+-- fitted inside). sub:SetMarked(true) puts a small accent dot on its button.
+function Tab:AddSubTab(name, icon, opts)
+	opts = opts or {}
 	if self.IsSubTab then error("Sub-tabs cannot be nested", 2) end
 	if not self.SubBar then
 		self.SubTabs, self._subCount = {}, 0
@@ -2665,13 +3422,17 @@ function Tab:AddSubTab(name, icon)
 		})
 		make("Frame", {Size = UDim2.new(1, 0, 0, 1), Position = UDim2.new(0, 0, 1, -1), BorderSizePixel = 0, Parent = self.SubBar},
 			{BackgroundColor3 = "Rule2"})
-		self.SubItems = create("Frame", {
-			BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Parent = self.SubBar,
-		}, {list(22, H, {VerticalAlignment = Enum.VerticalAlignment.Bottom}), create("UIPadding", {PaddingLeft = UDim.new(0, 4)})})
+		-- scrolls sideways (wheel or drag) when the sub-tabs don't fit
+		self.SubItems = create("ScrollingFrame", {
+			BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.fromScale(1, 1), Parent = self.SubBar,
+			ScrollingDirection = Enum.ScrollingDirection.X, ScrollBarThickness = 0,
+			CanvasSize = UDim2.new(), AutomaticCanvasSize = AX,
+		}, {list(22, H, {VerticalAlignment = Enum.VerticalAlignment.Bottom}), create("UIPadding", {PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 4)})})
 	end
 	self._subCount += 1
 	local sub = setmetatable({Name = name, Window = self.Window, ParentTab = self, IsSubTab = true, _secCount = 0}, Tab)
-	local iconPad = icon and 20 or 0
+	local iconSize = opts.IconSize or Vector2.new(14, 14)
+	local iconPad = icon and (iconSize.X + 6) or 0
 
 	sub.Button = create("TextButton", {
 		Name = name,
@@ -2690,7 +3451,8 @@ function Tab:AddSubTab(name, icon)
 		sub.Icon = create("ImageLabel", {
 			Image = asset(icon),
 			BackgroundTransparency = 1,
-			Size = UDim2.fromOffset(14, 14),
+			ScaleType = Enum.ScaleType.Fit,
+			Size = UDim2.fromOffset(iconSize.X, iconSize.Y),
 			Position = UDim2.new(0, -iconPad, 0.5, 0),
 			AnchorPoint = Vector2.new(0, 0.5),
 			Parent = sub.Button,
@@ -2700,6 +3462,11 @@ function Tab:AddSubTab(name, icon)
 		Size = UDim2.new(0, 0, 0, 2), Position = UDim2.new(0, -iconPad, 1, -2), BorderSizePixel = 0, Parent = sub.Button,
 	}, {BackgroundColor3 = "Accent"})
 	sub._iconPad = iconPad
+	local dot = make("Frame", {
+		Size = UDim2.fromOffset(5, 5), Position = UDim2.new(1, 4, 0, 9), AnchorPoint = Vector2.new(0, 0.5),
+		BorderSizePixel = 0, Visible = false, Parent = sub.Button,
+	}, {BackgroundColor3 = "Accent"}, {corner(3)})
+	function sub:SetMarked(on) dot.Visible = on == true end
 
 	sub.Page = create("Frame", {
 		Name = name,
@@ -2839,14 +3606,141 @@ local function touch()
 	end)
 end
 
+-- A flag defaults to the element's name. When that is already taken (the same name on
+-- two tabs), the element is filed under its tab path instead, e.g. "Visuals/ESP/Enabled",
+-- so neither overwrites the other in Flags, configs, binds or search.
+local function uniqueFlag(opts, tab)
+	local flag = opts.Flag or opts.Name
+	if Library.Elements[flag] == nil then return flag end
+	local base = flag
+	if not opts.Flag and tab then
+		base = (tab.IsSubTab and (tab.ParentTab.Name .. "/") or "") .. tab.Name .. "/" .. flag
+	end
+	local candidate, n = base, 1
+	while Library.Elements[candidate] ~= nil do
+		n += 1
+		candidate = base .. " " .. n
+	end
+	if opts.Flag then
+		warn(("[UIAPI] Flag %q is already in use; %q is saved as %q instead"):format(flag, tostring(opts.Name), candidate))
+	end
+	return candidate
+end
+
+-- ---------------------------------------------------------------------------
+-- DEPENDENT CONTROLS
+-- opts.DependsOn hangs a control under another one: it unfolds (row height grows, like an
+-- opening dropdown) while the other is on, and folds away while it is off.
+--   DependsOn = "Flag"                                   shown while that flag is on
+--   DependsOn = {Flag = "Flag", Values = {"A", "B"}}     shown while it is one of these (or, for a
+--                                                        multi-select, while any of them is picked)
+-- Chains work: a control under a hidden control is hidden too.
+-- ---------------------------------------------------------------------------
+local DEP_WATCH = {} -- flag -> controls that depend on it
+local function depMet(el)
+	local d = el._dep
+	local parent = Library.Elements[d.Flag]
+	if parent and parent._depHidden then return false end
+	local v = Library.Flags[d.Flag]
+	if d.Values then
+		if type(v) == "table" then
+			for _, x in ipairs(d.Values) do if table.find(v, x) then return true end end
+			return false
+		end
+		return table.find(d.Values, v) ~= nil
+	end
+	if type(v) == "table" then return #v > 0 end
+	return v ~= nil and v ~= false and v ~= "" and v ~= "None"
+end
+local applyDep
+local function notifyDeps(flag)
+	local list = DEP_WATCH[flag]
+	if not list then return end
+	local w = Library._window
+	local instant = w and w._applying
+	for _, el in ipairs(list) do applyDep(el, instant) end
+end
+function applyDep(el, instant)
+	local f = el.Frame
+	if not (f and f.Parent) then return end
+	local show = depMet(el)
+	if el._depReady and el._depHidden == not show then return end
+	local first = not el._depReady
+	el._depReady = true
+	el._depHidden = not show
+	if el._depClip == nil then el._depClip = f.ClipsDescendants end
+	el._depTween = (el._depTween or 0) + 1
+	local token = el._depTween
+	if show then
+		local h = el._depH or f.Size.Y.Offset
+		f.Visible = true
+		if instant or first then
+			f.Size = UDim2.new(1, 0, 0, h)
+			f.ClipsDescendants = el._depClip
+		else
+			f.ClipsDescendants = true
+			f.Size = UDim2.new(1, 0, 0, 0)
+			tween(f, {Size = UDim2.new(1, 0, 0, h)}, MED).Completed:Connect(function()
+				if el._depTween == token then f.ClipsDescendants = el._depClip end
+			end)
+		end
+	else
+		if f.Size.Y.Offset > 0 then el._depH = f.Size.Y.Offset end
+		f.ClipsDescendants = true
+		if instant or first then
+			f.Size = UDim2.new(1, 0, 0, 0)
+			f.Visible = false
+		else
+			tween(f, {Size = UDim2.new(1, 0, 0, 0)}, MED).Completed:Connect(function()
+				if el._depTween == token and el._depHidden then f.Visible = false end
+			end)
+		end
+	end
+	notifyDeps(el.Flag) -- anything hanging under this control follows it
+end
+
+-- el:SetLocked(true) greys an element out and blocks its input (e.g. settings that currently follow
+-- another profile); its value still shows and can still be :Set() by the script
+local function setLocked(el, locked)
+	local f = el.Frame
+	el.Locked = locked == true
+	if not f then return end
+	if el.Locked and not el._lock then
+		el._lock = make("TextButton", {
+			Text = "", AutoButtonColor = false, BorderSizePixel = 0, BackgroundTransparency = 0.4,
+			Size = UDim2.fromScale(1, 1), ZIndex = 60, Parent = f,
+		}, {BackgroundColor3 = "PageBg"})
+	end
+	if el._lock then el._lock.Visible = el.Locked end
+end
+
+
+-- opts.NoSave = true: the control shows state the script keeps itself (e.g. the selected player's switches),
+-- so configs never save, load or reset it, unloading never flips it, and the settings search skips it
+local UNNAMED = 0
 local function register(el, opts, tab)
-	el.Flag = opts.Flag or opts.Name
+	el.NoSave = opts.NoSave == true
+	if opts.Flag == nil and opts.Name == nil then
+		UNNAMED += 1
+		opts.Flag = (el.Type or "Element") .. "#" .. UNNAMED
+		el.NoSave = true
+	end
+	if el.NoSave then el.Hidden = true end
+	el.Flag = uniqueFlag(opts, tab)
+	el.SetLocked = setLocked
 	el.Name = opts.Name or el.Flag
 	el.Default = el.Value
 	el.Tab = tab
 	el.Callback = opts.Callback or function() end
 	Library.Elements[el.Flag] = el
 	Library.Flags[el.Flag] = el.Value
+	if opts.DependsOn then
+		local d = opts.DependsOn
+		el._dep = type(d) == "string" and {Flag = d} or {Flag = d.Flag, Values = d.Values or (d.Value ~= nil and {d.Value} or nil)}
+		DEP_WATCH[el._dep.Flag] = DEP_WATCH[el._dep.Flag] or {}
+		table.insert(DEP_WATCH[el._dep.Flag], el)
+		task.defer(function() applyDep(el, true) end) -- once the Add* call has built el.Frame
+	end
 end
 
 -- ---------------------------------------------------------------------------
@@ -2904,11 +3798,14 @@ function Tab:AddSection(text, opts)
 	return self
 end
 
+-- Tab:AddLabel(text, opts): opts.Role = a theme colour for the text (e.g. "Danger", "Warning",
+-- "Success", "SubText"); opts.Copy adds a copy button.
 function Tab:AddLabel(text, opts)
 	opts = opts or {}
 	local f = row((opts and opts.Parent) or self, ROW_H)
 	local l = label({
 		Text = text,
+		Role = opts.Role,
 		TextWrapped = true,
 		TextYAlignment = Enum.TextYAlignment.Top,
 		AutomaticSize = AY,
@@ -2916,10 +3813,14 @@ function Tab:AddLabel(text, opts)
 		Position = UDim2.fromOffset(PAD, 15),
 		Parent = f,
 	})
+	local el = {Type = "Label", Frame = f}
 	-- The row grows with wrapped text (long descriptions span several lines).
 	local function fit()
 		local textH = l.AbsoluteSize.Y / self.Window:_uiScale()
-		f.Size = UDim2.new(1, 0, 0, math.max(ROW_H, math.ceil(textH) + 30))
+		local h = math.max(ROW_H, math.ceil(textH) + 30)
+		-- folded away under DependsOn: remember the height for when it unfolds
+		if el._depHidden then el._depH = h return end
+		f.Size = UDim2.new(1, 0, 0, h)
 	end
 	l:GetPropertyChangedSignal("AbsoluteSize"):Connect(fit)
 	fit()
@@ -2937,9 +3838,15 @@ function Tab:AddLabel(text, opts)
 		end)
 	end
 
-	return {
-		Set = function(_, t) l.Text = t end,
-	}
+	el.Set = function(_, t) l.Text = t end
+	if opts.DependsOn then
+		local d = opts.DependsOn
+		el._dep = type(d) == "string" and {Flag = d} or {Flag = d.Flag, Values = d.Values or (d.Value ~= nil and {d.Value} or nil)}
+		DEP_WATCH[el._dep.Flag] = DEP_WATCH[el._dep.Flag] or {}
+		table.insert(DEP_WATCH[el._dep.Flag], el)
+		task.defer(function() applyDep(el, true) end)
+	end
+	return el
 end
 
 -- Markdown docs: headings, bold/italic/code, bullets, quotes, dividers.
@@ -3097,7 +4004,7 @@ local function attachBind(window, f, hit, el, name, pos, showMode, onState)
 		chip.Visible = b ~= nil
 		dots.Visible = b == nil
 		if b then
-			chip.Text = b.Key.Name .. (showMode ~= false and ("  ·  " .. string.upper(b.Mode)) or "")
+			chip.Text = keyLabel(b.Key) .. (showMode ~= false and ("  ·  " .. string.upper(b.Mode)) or "")
 		end
 		if onState then onState(b ~= nil) end
 		window:UpdateKeybindHUD()
@@ -3111,48 +4018,61 @@ function Tab:AddToggle(opts)
 	local window = self.Window
 	local el = {Type = "Toggle", Value = opts.Default or false}
 	register(el, opts, self)
-	local f = row((opts and opts.Parent) or self, ROW_H)
+	local note = opts.Note
+	local f = row((opts and opts.Parent) or self, note and 56 or ROW_H)
+	el.Frame = f
 	local hit = create("TextButton", {Text = "", BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), Parent = f})
 
-	local titleLabel = label({
+	-- opts.Color tints the name: a Color3, or a theme role name ("Warning", "Accent", ...) to follow the theme
+	local nameRole = nil -- nil = the normal "Text" role
+	if typeof(opts.Color) == "Color3" then nameRole = false elseif type(opts.Color) == "string" then nameRole = opts.Color end
+	local nameLabel = label({
 		Text = opts.Name,
 		TextTruncate = TRUNC,
-		Size = UDim2.new(1, -190, 1, 0),
-		Position = UDim2.fromOffset(PAD, 0),
+		Role = nameRole,
+		Size = note and UDim2.new(1, -190, 0, 18) or UDim2.new(1, -190, 1, 0),
+		Position = UDim2.fromOffset(PAD, note and 10 or 0),
 		Parent = f,
 	})
+	if typeof(opts.Color) == "Color3" then nameLabel.TextColor3 = opts.Color end
+	-- Note: an italic caption under the name, laid out like the Config tab's Auto-save row.
+	if note then
+		label({
+			Text = note, FontFace = FONTS.Italic, TextSize = 12, Role = "SubText", TextTruncate = TRUNC,
+			Size = UDim2.new(1, -190, 0, 16), Position = UDim2.fromOffset(PAD, 31), Parent = f,
+		})
+	end
 	local _, show = capsule(f, UDim2.new(1, -PAD - 1, 0.5, 0))
 
 	attachBind(window, f, hit, el, opts.Name, UDim2.new(1, -PAD - 42, 0.5, 0), true)
 
 	-- Dynamic caption: lets a toggle rewrite its own text on state change
-	-- (e.g. "Public party, appears on browse" / "Private, code only").
-	-- Animated: quick fade out, swap, fade in - never an instant cut.
+	-- (e.g. "Public party, appears on browse" / "Private, code only"), with a quick fade.
 	function el:SetName(text)
 		opts.Name = text
 		text = tostring(text)
 		local token = (el._nameToken or 0) + 1
 		el._nameToken = token
 		task.spawn(function()
-			local same = false
-			pcall(function() same = (titleLabel.Text == text) end)
-			if same then return end
-			local tw = tween(titleLabel, { TextTransparency = 1 }, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
+			if nameLabel.Text == text then return end
+			local tw = tween(nameLabel, {TextTransparency = 1}, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
 			if tw then pcall(function() tw.Completed:Wait() end) else task.wait(0.1) end
 			if el._nameToken ~= token then return end
-			pcall(function() titleLabel.Text = text end)
-			tween(titleLabel, { TextTransparency = 0 }, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
+			nameLabel.Text = text
+			tween(nameLabel, {TextTransparency = 0}, TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out))
 		end)
 	end
 
 	function el:Set(v, silent)
 		self.Value = v
 		Library.Flags[self.Flag] = v
+		notifyDeps(self.Flag)
 		touch()
 		show(v, true)
 		window:UpdateKeybindHUD()
 		if not silent then
-			playSound("Toggle")
+			-- no click per toggle while a config loads or the menu unloads (dozens at once)
+			if not window._applying then playSound("Toggle") end
 			self.Callback(v)
 		end
 	end
@@ -3179,6 +4099,7 @@ function Tab:AddSlider(opts)
 	local el = {Type = "Slider", Value = opts.Default or min}
 	register(el, opts, self)
 	local f = row((opts and opts.Parent) or self, ROW_H)
+	el.Frame = f
 	local VALUE_W = 80
 
 	label({
@@ -3239,6 +4160,7 @@ function Tab:AddSlider(opts)
 		v = math.clamp(math.floor((v - min) / step + 0.5) * step + min, min, max)
 		self.Value = v
 		Library.Flags[self.Flag] = v
+		notifyDeps(self.Flag)
 		touch()
 		local a = (max == min) and 0 or (v - min) / (max - min)
 		tween(fill, {Size = UDim2.fromScale(a, 1)}, TweenInfo.new(0.05))
@@ -3255,15 +4177,25 @@ function Tab:AddSlider(opts)
 		if num then el:Set(num) else el:Set(el.Value) end
 	end)
 
-	local dragging = false
+	-- CallbackOnRelease: dragging only moves the slider, and Callback runs once when it is let go.
+	-- A typed value, a config load or el:Set from code still call it straight away.
+	local onRelease = opts.CallbackOnRelease == true
+	local dragging, dragFrom = false, nil
+	local lastTick = 0
 	local function update(x)
 		local a = math.clamp((x - trackF.AbsolutePosition.X) / math.max(trackF.AbsoluteSize.X, 1), 0, 1)
-		el:Set(min + a * (max - min))
+		local before = el.Value
+		el:Set(min + a * (max - min), onRelease)
+		-- a tick per step while dragging, for themes that have one (at most ~20 a second)
+		if el.Value ~= before and os.clock() - lastTick > 0.05 and themeSound("Slide") then
+			lastTick = os.clock()
+			playSound("Slide")
+		end
 	end
 
 	hit.InputBegan:Connect(function(i)
 		if isPress(i) then
-			dragging = true
+			dragging, dragFrom = true, el.Value
 			tween(nib, {Size = UDim2.fromOffset(3, 18)}, FAST)
 			update(i.Position.X)
 		end
@@ -3272,6 +4204,7 @@ function Tab:AddSlider(opts)
 		if dragging and isPress(i) then
 			dragging = false
 			tween(nib, {Size = UDim2.fromOffset(3, 14)}, FAST)
+			if onRelease and el.Value ~= dragFrom then el.Callback(el.Value) end
 		end
 	end)
 	connect(UIS.InputChanged, function(i)
@@ -3291,6 +4224,7 @@ function Tab:AddButton(opts)
 	register(el, opts, self)
 	local role = opts.Danger and "Danger" or "Accent"
 	local f = row((opts and opts.Parent) or self, ROW_H)
+	el.Frame = f
 
 	local btn = create("TextButton", {
 		Text = "",
@@ -3318,15 +4252,8 @@ function Tab:AddButton(opts)
 		text.Size = UDim2.new(1, -160, 0, 18)
 		text.Position = UDim2.fromOffset(PAD, 7)
 		local desc = label({
-			Name = "Desc",
-			Text = opts.Desc,
-			FontFace = FONTS.Body,
-			TextSize = 12,
-			Role = "SubText",
-			TextTruncate = TRUNC,
-			Size = UDim2.new(1, -160, 0, 14),
-			Position = UDim2.fromOffset(PAD, 26),
-			Parent = f,
+			Name = "Desc", Text = opts.Desc, FontFace = FONTS.Body, TextSize = 12, Role = "SubText",
+			TextTruncate = TRUNC, Size = UDim2.new(1, -160, 0, 14), Position = UDim2.fromOffset(PAD, 26), Parent = f,
 		})
 		desc.ZIndex = 2
 	end
@@ -3363,7 +4290,14 @@ function Tab:AddButton(opts)
 
 	attachBind(window, f, btn, el, opts.Name, UDim2.new(1, -PAD - 28, 0.5, 0), true)
 	el:RefreshBind()
-	return f
+	-- Glider scripts used the returned row as an Instance (row:FindFirstChild("Label")): anything el doesn't
+	-- have is read from the row, and its methods run on the row.
+	return setmetatable(el, {__index = function(_, k)
+		local ok, v = pcall(function() return f[k] end)
+		if not ok then return nil end
+		if type(v) == "function" then return function(_, ...) return v(f, ...) end end
+		return v
+	end})
 end
 
 -- ---------------------------------------------------------------------------
@@ -3405,6 +4339,7 @@ function Tab:AddDropdown(opts)
 	local el = {Type = "Dropdown", Value = opts.Default or opts.Options[1] or ""}
 	register(el, opts, self)
 	local f = row((opts and opts.Parent) or self, ROW_H)
+	el.Frame = f
 	f.ClipsDescendants = true
 
 	local hit = create("TextButton", {Text = "", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, ROW_H), Parent = f})
@@ -3454,6 +4389,7 @@ function Tab:AddDropdown(opts)
 	function el:Set(v, silent)
 		self.Value = v
 		Library.Flags[self.Flag] = v
+		notifyDeps(self.Flag)
 		touch()
 		valueLabel.Text = tostring(v)
 		for option, view in pairs(optionViews) do paintOption(option, view) end
@@ -3541,6 +4477,7 @@ function Tab:AddMultiDropdown(opts)
 	local el = {Type = "MultiDropdown", Value = opts.Default or {}}
 	register(el, opts, self)
 	local f = row((opts and opts.Parent) or self, ROW_H)
+	el.Frame = f
 	f.ClipsDescendants = true
 
 	local hit = create("TextButton", {Text = "", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, ROW_H), Parent = f})
@@ -3563,8 +4500,9 @@ function Tab:AddMultiDropdown(opts)
 		BackgroundTransparency = 1, Position = UDim2.fromOffset(0, ROW_H), Size = UDim2.new(1, 0, 0, 0), AutomaticSize = AY,
 		Parent = f,
 	}, {list(0)})
+	local search = opts.Search and searchField(body, 1) or nil
 	local actions = create("Frame", {
-		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 26), LayoutOrder = 1, Parent = body,
+		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 26), LayoutOrder = 2, Parent = body,
 	}, {list(18, H, {VerticalAlignment = Enum.VerticalAlignment.Center}), create("UIPadding", {PaddingLeft = UDim.new(0, PAD)})})
 	local function link(text, role, order)
 		local b = make("TextButton", {
@@ -3579,18 +4517,23 @@ function Tab:AddMultiDropdown(opts)
 	local scroll = make("ScrollingFrame", {
 		Size = UDim2.new(1, 0, 0, 0), BackgroundTransparency = 1, BorderSizePixel = 0,
 		ScrollBarThickness = 2, CanvasSize = UDim2.new(),
-		AutomaticCanvasSize = AY, LayoutOrder = 2, Parent = body,
+		AutomaticCanvasSize = AY, LayoutOrder = 3, Parent = body,
 	}, {ScrollBarImageColor3 = "Rule2"}, {list(0)})
 
 	local open = false
-	local boxes = {}
+	local boxes, rendered = {}, 0
 
+	-- Whether an option matches the search text (every option does when there is no search).
+	local function matches(option)
+		local q = search and string.lower(search.Text) or ""
+		return q == "" or string.find(string.lower(tostring(option)), q, 1, true) ~= nil
+	end
 	local function listHeight()
-		return math.min(#opts.Options, maxVisible) * ROW
+		return math.min(rendered, maxVisible) * ROW
 	end
 	local function resize()
 		local h = ROW_H
-		if open then h = ROW_H + 26 + listHeight() + 10 end
+		if open then h = ROW_H + (search and 34 or 0) + 26 + listHeight() + 10 end
 		tween(f, {Size = UDim2.new(1, 0, 0, h)}, MED)
 	end
 	local function paintBox(v, on)
@@ -3615,8 +4558,11 @@ function Tab:AddMultiDropdown(opts)
 	end)
 
 	function el:Set(tbl, silent)
-		self.Value = tbl or {}
+		-- a single value (e.g. a config saved while this was a plain dropdown) becomes a one-item list
+		if type(tbl) ~= "table" then tbl = tbl ~= nil and {tbl} or {} end
+		self.Value = tbl
 		Library.Flags[self.Flag] = self.Value
+		notifyDeps(self.Flag)
 		touch()
 		paintSummary()
 		for option, v in pairs(boxes) do paintBox(v, table.find(self.Value, option) ~= nil) end
@@ -3626,51 +4572,76 @@ function Tab:AddMultiDropdown(opts)
 	local function build()
 		for _, v in pairs(boxes) do v.Button:Destroy() end
 		boxes = {}
+		rendered = 0
 		for i, option in ipairs(opts.Options) do
-			local b = make("TextButton", {
-				Text = "", AutoButtonColor = false, BackgroundTransparency = 1, BorderSizePixel = 0,
-				Size = UDim2.new(1, -4, 0, ROW), LayoutOrder = i, Parent = scroll,
-			}, {BackgroundColor3 = "Hover"})
-			local box = create("Frame", {
-				Size = UDim2.fromOffset(14, 14), Position = UDim2.new(0, PAD, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5),
-				BorderSizePixel = 0, Parent = b,
-			}, {corner(2)})
-			local boxStroke = create("UIStroke", {Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = box})
-			local check = create("TextLabel", {
-				Text = "✓", FontFace = FONTS.Symbol, TextSize = 11, BackgroundTransparency = 1,
-				TextXAlignment = CENTER, Size = UDim2.fromScale(1, 1), Visible = false, Parent = box,
-			})
-			label({
-				Text = tostring(option), TextTruncate = TRUNC,
-				Size = UDim2.new(1, -PAD * 2 - 24, 1, 0), Position = UDim2.fromOffset(PAD + 24, 0), Parent = b,
-			})
-			local v = {Button = b, Box = box, Stroke = boxStroke, Check = check}
-			boxes[option] = v
-			paintBox(v, table.find(el.Value, option) ~= nil)
-			b.MouseEnter:Connect(function() tween(b, {BackgroundTransparency = 0.96}) end)
-			b.MouseLeave:Connect(function() tween(b, {BackgroundTransparency = 1}) end)
-			b.MouseButton1Click:Connect(function()
-				playSound("Click")
-				local idx = table.find(el.Value, option)
-				local newTbl = table.clone(el.Value)
-				if idx then table.remove(newTbl, idx) else table.insert(newTbl, option) end
-				el:Set(newTbl)
-			end)
+			if matches(option) then
+				rendered += 1
+				local b = make("TextButton", {
+					Text = "", AutoButtonColor = false, BackgroundTransparency = 1, BorderSizePixel = 0,
+					Size = UDim2.new(1, -4, 0, ROW), LayoutOrder = i, Parent = scroll,
+				}, {BackgroundColor3 = "Hover"})
+				local box = create("Frame", {
+					Size = UDim2.fromOffset(14, 14), Position = UDim2.new(0, PAD, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5),
+					BorderSizePixel = 0, Parent = b,
+				}, {corner(2)})
+				local boxStroke = create("UIStroke", {Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = box})
+				local check = create("TextLabel", {
+					Text = "✓", FontFace = FONTS.Symbol, TextSize = 11, BackgroundTransparency = 1,
+					TextXAlignment = CENTER, Size = UDim2.fromScale(1, 1), Visible = false, Parent = box,
+				})
+				label({
+					Text = tostring(option), TextTruncate = TRUNC,
+					Size = UDim2.new(1, -PAD * 2 - 24, 1, 0), Position = UDim2.fromOffset(PAD + 24, 0), Parent = b,
+				})
+				local v = {Button = b, Box = box, Stroke = boxStroke, Check = check}
+				boxes[option] = v
+				paintBox(v, table.find(el.Value, option) ~= nil)
+				b.MouseEnter:Connect(function() tween(b, {BackgroundTransparency = 0.96}) end)
+				b.MouseLeave:Connect(function() tween(b, {BackgroundTransparency = 1}) end)
+				b.MouseButton1Click:Connect(function()
+					playSound("Click")
+					local idx = table.find(el.Value, option)
+					local newTbl = table.clone(el.Value)
+					if idx then table.remove(newTbl, idx) else table.insert(newTbl, option) end
+					el:Set(newTbl)
+				end)
+			end
 		end
 		scroll.Size = UDim2.new(1, 0, 0, listHeight())
 		if open then resize() end
 	end
 
+	-- With a search typed, Select all and Clear only touch the options it shows.
 	selectAllBtn.MouseButton1Click:Connect(function()
 		playSound("Click")
-		el:Set(table.clone(opts.Options))
+		local newTbl = {}
+		for _, option in ipairs(opts.Options) do
+			if matches(option) or table.find(el.Value, option) then table.insert(newTbl, option) end
+		end
+		el:Set(newTbl)
 	end)
 	clearBtn.MouseButton1Click:Connect(function()
 		playSound("Click")
-		el:Set({})
+		local newTbl = {}
+		for _, option in ipairs(el.Value) do
+			if not matches(option) then table.insert(newTbl, option) end
+		end
+		el:Set(newTbl)
 	end)
 
+	-- Picks that are no longer offered are dropped, as Dropdown:SetOptions does.
+	function el:SetOptions(options, silent)
+		opts.Options = options or {}
+		build()
+		local kept = {}
+		for _, option in ipairs(self.Value) do
+			if table.find(opts.Options, option) then table.insert(kept, option) end
+		end
+		if #kept ~= #self.Value then self:Set(kept, silent) end
+	end
+
 	build()
+	if search then search:GetPropertyChangedSignal("Text"):Connect(build) end
 	hit.MouseButton1Click:Connect(function()
 		playSound("Click")
 		open = not open
@@ -3689,6 +4660,7 @@ function Tab:AddTextbox(opts)
 	local el = {Type = "Textbox", Value = opts.Default or ""}
 	register(el, opts, self)
 	local f = row((opts and opts.Parent) or self, ROW_H)
+	el.Frame = f
 	label({
 		Text = opts.Name, TextTruncate = TRUNC,
 		Size = UDim2.new(0.45, -PAD, 1, 0), Position = UDim2.fromOffset(PAD, 0), Parent = f,
@@ -3706,6 +4678,7 @@ function Tab:AddTextbox(opts)
 	function el:Set(v, silent)
 		self.Value = v
 		Library.Flags[self.Flag] = v
+		notifyDeps(self.Flag)
 		touch()
 		box.Text = v
 		if not silent then self.Callback(v) end
@@ -3723,6 +4696,7 @@ function Tab:AddColorPicker(opts)
 	local SQ, BAR, BOX = 104, 8, 24
 	local bodyH = SQ + 10 + BAR + 12 + BOX
 	local f = row((opts and opts.Parent) or self, ROW_H)
+	el.Frame = f
 	f.ClipsDescendants = true
 
 	local hit = create("TextButton", {Text = "", BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, ROW_H), Parent = f})
@@ -3854,11 +4828,12 @@ function Tab:AddKeybind(opts)
 	end
 
 	local f = row((opts and opts.Parent) or self, ROW_H)
+	el.Frame = f
 	label({
 		Text = opts.Name, TextTruncate = TRUNC,
 		Size = UDim2.new(1, -150, 1, 0), Position = UDim2.fromOffset(PAD, 0), Parent = f,
 	})
-	local btn = keycap(el.Value, f, "Text")
+	local btn = keycap(el.Value == "None" and "None" or keyLabel(toKeyCode(el.Value)), f, "Text")
 	btn.AnchorPoint = Vector2.new(1, 0.5)
 	btn.Position = UDim2.new(1, -PAD - 1, 0.5, 0)
 	local edge = btn:FindFirstChildOfClass("UIStroke")
@@ -3866,8 +4841,10 @@ function Tab:AddKeybind(opts)
 	function el:Set(v, silent)
 		self.Value = v
 		Library.Flags[self.Flag] = v
+		notifyDeps(self.Flag)
 		touch()
-		btn.Text = v
+		local k = toKeyCode(v)
+		btn.Text = k and keyLabel(k) or tostring(v)
 		tween(edge, {Color = CURRENT_THEME.Rule2})
 		if not silent then self.Callback(toKeyCode(v)) end
 	end
@@ -3881,11 +4858,1462 @@ function Tab:AddKeybind(opts)
 end
 
 -- ---------------------------------------------------------------------------
+-- SKIN PICKER ELEMENT (catalogue grid)
+-- Category chips, a weapon strip, then a grid of skin cards with a rarity filter.
+-- One pick per weapon per team; clicking the picked card again clears it.
+-- Value = {[teamId] = {[weapon] = skin}}, saved with configs like any flag.
+--   Tab:AddSkinPicker({
+--     Name = "Skins", Flag = "Skins",
+--     Teams = {{Id = "CT", Name = "Counter-Terrorists", Color = c}, {Id = "T", Name = "Terrorists", Color = c}},
+--     Rarities = {{Name = "Red", Color = c}, ...},        -- order used by the filter
+--     Categories = {{Name = "Rifles", Weapons = {{Name = "AK-47", Icon = id, Skins = {{Name = "Lore", Rarity = "Red", Image = id}}}}}},
+--     (a skin's Name is the value stored; an optional Display is what its card shows)
+--     Callback = function(value, change) end,            -- change = {Team, Weapon, Skin} (Skin nil = cleared)
+--     Customize = {Text = "Customize", Callback = function(weapon, skin, team) end},  -- button on the equipped card
+--   })
+-- Without Teams there is a single loadout under the id "All".
+-- ---------------------------------------------------------------------------
+function Tab:AddSkinPicker(opts)
+	local window = self.Window
+	local teams = (opts.Teams and #opts.Teams > 0) and opts.Teams or {{Id = "All", Name = "All"}}
+	local multi = #teams > 1
+	local rarities = opts.Rarities or {}
+	local rarityColor = {}
+	for _, r in ipairs(rarities) do rarityColor[r.Name] = r.Color end
+	local GRID_H, MIN_CARD, GAP = opts.Height or 430, opts.CardWidth or 150, 8
+	local HEAD_H, CATS_H, STRIP_H = 46, 50, 66
+
+	local function blank()
+		local v = {}
+		for _, t in ipairs(teams) do v[t.Id] = {} end
+		return v
+	end
+	local el = {Type = "SkinPicker", Value = blank()}
+	register(el, opts, self)
+	el.Default = blank()
+
+	local cats = opts.Categories or {}
+	local st = {cat = 1, weapon = nil, team = teams[1].Id, rarity = nil}
+	local BOTH = "__both__"
+	-- edit both teams at once by default; opts.DefaultTeam picks a team id (or "Both") instead
+	if multi and opts.BothOption ~= false and (opts.DefaultTeam == nil or opts.DefaultTeam == "Both") then
+		st.team = BOTH
+	elseif opts.DefaultTeam then
+		for _, t in ipairs(teams) do if t.Id == opts.DefaultTeam then st.team = t.Id end end
+	end
+	local buildCards -- defined with the grid below; the rarity filter calls it
+
+	local f = block(self, HEAD_H + CATS_H + STRIP_H + GRID_H + 12)
+	el.Frame = f
+	f.ClipsDescendants = false
+	f:FindFirstChild("Rule").Visible = false
+
+	-- header: weapon title on the left, team switch on the right
+	local titleCap = create("UISizeConstraint", {MaxSize = Vector2.new(400, HEAD_H)})
+	local title = label({
+		Text = "", FontFace = FONTS.Heading, TextSize = 15, AutomaticSize = AX, TextTruncate = TRUNC,
+		Size = UDim2.fromOffset(0, HEAD_H), Position = UDim2.fromOffset(PAD, 0), Parent = f,
+	}, {titleCap})
+	local count = label({
+		Text = "", FontFace = FONTS.Italic, TextSize = 12, Role = "SubText", AutomaticSize = AX,
+		Size = UDim2.fromOffset(0, HEAD_H), Position = UDim2.fromOffset(PAD, 1), Parent = f,
+	})
+	local seg -- the team switch, set below when there is more than one team
+	-- keep "title  N skins" left of the team switch however narrow the window gets
+	local function layoutHead()
+		local scale = window:_uiScale()
+		local width = f.AbsoluteSize.X / scale
+		local segW = seg and (seg.AbsoluteSize.X / scale + 12) or 0
+		local countW = count.TextBounds.X / scale
+		local room = width - PAD * 2 - segW - countW - 10
+		titleCap.MaxSize = Vector2.new(math.max(40, room), HEAD_H)
+		count.Visible = room > 60
+		count.Position = UDim2.fromOffset(PAD + title.AbsoluteSize.X / scale + 10, 1)
+	end
+	title:GetPropertyChangedSignal("AbsoluteSize"):Connect(layoutHead)
+	count:GetPropertyChangedSignal("TextBounds"):Connect(layoutHead)
+	f:GetPropertyChangedSignal("AbsoluteSize"):Connect(layoutHead)
+
+	local teamBtns = {}
+	local paintTeams
+	if multi then
+		seg = create("Frame", {
+			BackgroundTransparency = 1, AutomaticSize = AX, Size = UDim2.fromOffset(0, 28),
+			Position = UDim2.new(1, -PAD, 0, HEAD_H / 2), AnchorPoint = Vector2.new(1, 0.5), Parent = f,
+		}, {corner(14), stroke("Rule2", 1, 0.2), padding(3), list(2, H)})
+		local entries = table.clone(teams)
+		if opts.BothOption ~= false then table.insert(entries, {Id = BOTH, Name = "Both"}) end
+		for i, t in ipairs(entries) do
+			local b = create("TextButton", {
+				Text = t.Short or t.Name, FontFace = FONTS.BodySemi, TextSize = 12, AutoButtonColor = false,
+				BackgroundTransparency = 1, AutomaticSize = AX, Size = UDim2.fromOffset(0, 22), LayoutOrder = i, Parent = seg,
+			}, {corner(11), padding(0, 11)})
+			teamBtns[t.Id] = {Button = b, Team = t}
+			b.MouseButton1Click:Connect(function()
+				if st.team == t.Id then return end
+				playSound("Click")
+				st.team = t.Id
+				paintTeams()
+				el:_refresh()
+			end)
+		end
+		function paintTeams()
+			local T = CURRENT_THEME
+			for id, v in pairs(teamBtns) do
+				local on = id == st.team
+				local c = v.Team.Color or T.Accent
+				tween(v.Button, {BackgroundTransparency = on and 0.82 or 1, BackgroundColor3 = c, TextColor3 = on and c or T.SubText})
+			end
+		end
+		restyle(seg, paintTeams)
+		seg:GetPropertyChangedSignal("AbsoluteSize"):Connect(layoutHead)
+	end
+
+	-- category chips + rarity filter
+	local catRow = create("ScrollingFrame", {
+		BackgroundTransparency = 1, BorderSizePixel = 0, Size = UDim2.new(1, -PAD * 2 - 162, 0, 38),
+		Position = UDim2.fromOffset(PAD, HEAD_H), ScrollingDirection = Enum.ScrollingDirection.X,
+		ScrollBarThickness = 0, CanvasSize = UDim2.new(), AutomaticCanvasSize = AX, ClipsDescendants = true, Parent = f,
+	}, {list(6, H, {VerticalAlignment = Enum.VerticalAlignment.Center}), create("UIPadding", {PaddingLeft = UDim.new(0, 1), PaddingRight = UDim.new(0, 1)})})
+	local chipViews = {}
+
+	local filterBtn = make("TextButton", {
+		Text = "", AutoButtonColor = false, BackgroundTransparency = 1, Size = UDim2.fromOffset(152, 34),
+		Position = UDim2.new(1, -PAD, 0, HEAD_H + 2), AnchorPoint = Vector2.new(1, 0), ZIndex = 4, Parent = f,
+	}, nil, {corner(5), stroke("Rule2", 1, 0.2)})
+	local filterDot = create("Frame", {
+		Size = UDim2.fromOffset(7, 7), Position = UDim2.new(0, 10, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5),
+		BorderSizePixel = 0, ZIndex = 4, Parent = filterBtn,
+	}, {corner(4)})
+	local filterText = label({
+		Text = "", TextSize = 14, TextTruncate = TRUNC, ZIndex = 4,
+		Size = UDim2.new(1, -44, 1, 0), Position = UDim2.fromOffset(24, 0), Parent = filterBtn,
+	})
+	drawnChevron({
+		Size = UDim2.new(0, 16, 1, 0), Position = UDim2.new(1, -8, 0, 0), AnchorPoint = Vector2.new(1, 0), ZIndex = 4, Parent = filterBtn,
+	})
+	local filterList = make("Frame", {
+		Visible = false, AutomaticSize = AY, Size = UDim2.fromOffset(170, 0), ZIndex = 30,
+		Position = UDim2.new(1, -PAD, 0, HEAD_H + 40), AnchorPoint = Vector2.new(1, 0), Parent = f,
+	}, {BackgroundColor3 = "PageRaised"}, {corner(6), stroke("Rule2", 1, 0), padding(4), list(0)})
+
+	local function paintFilter()
+		local T = CURRENT_THEME
+		filterText.Text = st.rarity or "All rarities"
+		filterDot.Visible = st.rarity ~= nil
+		filterDot.BackgroundColor3 = st.rarity and rarityColor[st.rarity] or T.SubText
+	end
+	local function filterOption(name, order)
+		local b = make("TextButton", {
+			Text = "", AutoButtonColor = false, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 26),
+			LayoutOrder = order, ZIndex = 31, Parent = filterList,
+		}, {BackgroundColor3 = "Hover"}, {corner(4)})
+		if name then
+			create("Frame", {
+				Size = UDim2.fromOffset(7, 7), Position = UDim2.new(0, 8, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5),
+				BackgroundColor3 = rarityColor[name], BorderSizePixel = 0, ZIndex = 31, Parent = b,
+			}, {corner(4)})
+		end
+		local t = label({
+			Text = name or "All rarities", TextSize = 13, ZIndex = 31,
+			Size = UDim2.new(1, -28, 1, 0), Position = UDim2.fromOffset(22, 0), Parent = b,
+		})
+		restyle(b, function()
+			local on = st.rarity == name
+			t.FontFace = on and FONTS.Italic or FONTS.Body
+			t.TextColor3 = on and CURRENT_THEME.Accent or CURRENT_THEME.Text
+		end)
+		b.MouseEnter:Connect(function() tween(b, {BackgroundTransparency = 0.94}) end)
+		b.MouseLeave:Connect(function() tween(b, {BackgroundTransparency = 1}) end)
+		b.MouseButton1Click:Connect(function()
+			playSound("Click")
+			st.rarity = name
+			filterList.Visible = false
+			for _, c in ipairs(filterList:GetChildren()) do
+				if RESTYLERS[c] then RESTYLERS[c]() end
+			end
+			paintFilter()
+			buildCards()
+		end)
+	end
+	filterOption(nil, 0)
+	for i, r in ipairs(rarities) do filterOption(r.Name, i) end
+	filterBtn.MouseButton1Click:Connect(function()
+		playSound("Click")
+		filterList.Visible = not filterList.Visible
+	end)
+	restyle(filterBtn, paintFilter)
+
+	-- weapon strip: no scrollbar; < and > at its ends page through it when the weapons overflow
+	local ARROW_W = 26
+	local strip = make("ScrollingFrame", {
+		BackgroundTransparency = 1, BorderSizePixel = 0, ScrollingDirection = Enum.ScrollingDirection.X,
+		ScrollBarThickness = 0, CanvasSize = UDim2.new(), AutomaticCanvasSize = AX,
+		Size = UDim2.new(1, -PAD * 2 - ARROW_W * 2, 0, STRIP_H - 4), Position = UDim2.fromOffset(PAD + ARROW_W, HEAD_H + CATS_H), Parent = f,
+	}, {ScrollBarImageColor3 = "Rule2"}, {list(4, H)})
+	local stripArrows = {}
+	local function paintArrows()
+		local over = strip.AbsoluteCanvasSize.X - strip.AbsoluteWindowSize.X
+		local x = strip.CanvasPosition.X
+		for _, a in ipairs(stripArrows) do
+			local can = over > 1 and ((a.Dir < 0 and x > 1) or (a.Dir > 0 and x < over - 1))
+			a.Can = can
+			a.Button.Visible = over > 1
+			for _, bar in ipairs(a.Chevron:GetChildren()) do
+				bar.BackgroundColor3 = (can and a.Hover) and CURRENT_THEME.Text or CURRENT_THEME.SubText
+				bar.BackgroundTransparency = can and 0 or 0.75
+			end
+		end
+	end
+	for _, dir in ipairs({-1, 1}) do
+		local btn = create("TextButton", {
+			Text = "", AutoButtonColor = false, BackgroundTransparency = 1, BorderSizePixel = 0,
+			Size = UDim2.fromOffset(ARROW_W, STRIP_H - 10),
+			Position = dir < 0 and UDim2.fromOffset(PAD, HEAD_H + CATS_H) or UDim2.new(1, -PAD - ARROW_W, 0, HEAD_H + CATS_H),
+			Parent = f,
+		})
+		local chev = drawnChevron({
+			Size = UDim2.fromOffset(16, 20), Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5),
+			Rotation = dir < 0 and 90 or -90, Parent = btn,
+		})
+		local a = {Dir = dir, Button = btn, Chevron = chev}
+		table.insert(stripArrows, a)
+		btn.MouseEnter:Connect(function() a.Hover = true paintArrows() end)
+		btn.MouseLeave:Connect(function() a.Hover = false paintArrows() end)
+		btn.MouseButton1Click:Connect(function()
+			if not a.Can then return end
+			playSound("Click")
+			local over = strip.AbsoluteCanvasSize.X - strip.AbsoluteWindowSize.X
+			local step = strip.AbsoluteWindowSize.X * 0.8
+			local x = math.clamp(strip.CanvasPosition.X + dir * step, 0, math.max(0, over))
+			tween(strip, {CanvasPosition = Vector2.new(x, 0)}, FAST)
+		end)
+	end
+	strip:GetPropertyChangedSignal("CanvasPosition"):Connect(paintArrows)
+	strip:GetPropertyChangedSignal("AbsoluteCanvasSize"):Connect(paintArrows)
+	strip:GetPropertyChangedSignal("AbsoluteWindowSize"):Connect(paintArrows)
+	restyle(strip, paintArrows)
+	make("Frame", {
+		Size = UDim2.new(1, -PAD * 2, 0, 1), Position = UDim2.fromOffset(PAD, HEAD_H + CATS_H + STRIP_H - 2),
+		BorderSizePixel = 0, Parent = f,
+	}, {BackgroundColor3 = "Rule2"})
+	local weaponViews = {}
+
+	-- card grid
+	local grid = make("ScrollingFrame", {
+		BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3, CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = AY, Size = UDim2.new(1, -PAD * 2 + 6, 0, GRID_H),
+		Position = UDim2.fromOffset(PAD, HEAD_H + CATS_H + STRIP_H + 8), Parent = f,
+	}, {ScrollBarImageColor3 = "Rule2"}, {create("UIPadding", {PaddingLeft = UDim.new(0, 6), PaddingRight = UDim.new(0, 8), PaddingBottom = UDim.new(0, 6), PaddingTop = UDim.new(0, 2)})})
+	local gridLayout = create("UIGridLayout", {
+		CellPadding = UDim2.fromOffset(GAP, GAP), SortOrder = Enum.SortOrder.LayoutOrder, Parent = grid,
+	})
+	local empty = label({
+		Text = "No skins match this filter.", FontFace = FONTS.Italic, TextSize = 13, Role = "SubText",
+		TextXAlignment = CENTER, Visible = false, Size = UDim2.new(1, 0, 0, 60),
+		Position = UDim2.fromOffset(0, HEAD_H + CATS_H + STRIP_H + 30), Parent = f,
+	})
+	local cardViews = {}
+
+	local function cellSize()
+		local w = grid.AbsoluteSize.X / window:_uiScale() - 14
+		if w <= 0 then w = 520 end
+		local cols = math.max(1, math.floor((w + GAP) / (MIN_CARD + GAP)))
+		local cw = math.floor((w - GAP * (cols - 1)) / cols)
+		return cw, math.floor(cw * 0.5) + 62
+	end
+	local function layoutGrid()
+		local cw, ch = cellSize()
+		gridLayout.CellSize = UDim2.fromOffset(cw, ch)
+		for _, v in ipairs(cardViews) do v.Art.Size = UDim2.new(1, 0, 0, ch - 62) end
+	end
+	grid:GetPropertyChangedSignal("AbsoluteSize"):Connect(layoutGrid)
+
+	local function currentCategory() return cats[st.cat] end
+	local function findWeapon(name)
+		for _, c in ipairs(cats) do
+			for _, w in ipairs(c.Weapons or {}) do
+				if w.Name == name then return w end
+			end
+		end
+	end
+	-- the skin shown as picked: the current team's, or under "Both" the one every team shares
+	local function pickedSkin(weapon)
+		if st.team ~= BOTH then return el.Value[st.team] and el.Value[st.team][weapon] end
+		local s
+		for i, t in ipairs(teams) do
+			local v = el.Value[t.Id] and el.Value[t.Id][weapon]
+			if i == 1 then s = v elseif v ~= s then return nil end
+		end
+		return s
+	end
+
+	local function paintCard(v)
+		local T = CURRENT_THEME
+		local on = pickedSkin(v.Weapon) == v.Skin.Name
+		v.Card.BackgroundColor3 = on and T.PageBg:Lerp(T.Accent, 0.1) or T.PageBg
+		v.Stroke.Color = on and T.Accent or (v.Hover and T.SubText or T.Rule2)
+		v.Stroke.Thickness = on and 2 or 1
+		v.Stroke.Transparency = on and 0 or (v.Hover and 0.2 or 0.35)
+		v.Tag.Visible = on
+		v.TagText.TextColor3 = T.Knob
+		v.Tag.BackgroundColor3 = T.Accent
+		if v.Custom then v.Custom.Visible = on end
+		-- small team badges wherever this skin is in use
+		for _, b in ipairs(v.Badges:GetChildren()) do
+			if b:IsA("TextLabel") then b:Destroy() end
+		end
+		if multi then
+			for i, t in ipairs(teams) do
+				if el.Value[t.Id] and el.Value[t.Id][v.Weapon] == v.Skin.Name then
+					local c = t.Color or T.Accent
+					create("TextLabel", {
+						Text = t.Short or t.Id, FontFace = FONTS.Mono, TextSize = 10, TextColor3 = c,
+						BackgroundColor3 = c:Lerp(Color3.new(), 0.72), BackgroundTransparency = 0.05,
+						AutomaticSize = AX, Size = UDim2.fromOffset(0, 16), LayoutOrder = i, ZIndex = 3, Parent = v.Badges,
+					}, {corner(3), padding(0, 5)})
+				end
+			end
+		end
+	end
+
+	-- 3D card art: opts.Preview(weapon, skin) returns a Model (or nil to keep the image). The model
+	-- is framed side-on along its longest axis and turns while the card is hovered.
+	local function preview(art, img, w, skin)
+		local vp = create("ViewportFrame", {
+			BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 2,
+			Ambient = Color3.fromRGB(170, 170, 170), LightColor = Color3.new(1, 1, 1), LightDirection = Vector3.new(-0.4, -1, -0.6),
+			Parent = art,
+		})
+		local cam = Instance.new("Camera")
+		cam.FieldOfView = 30
+		cam.Parent = vp
+		vp.CurrentCamera = cam
+		local state = {spinning = false, angle = 0}
+		local center, up, side, dist
+		local function place()
+			if not center then return end
+			local dir = CFrame.fromAxisAngle(up, state.angle):VectorToWorldSpace(side)
+			cam.CFrame = CFrame.lookAt(center + dir * dist, center, up)
+		end
+		task.spawn(function()
+			local ok, model = pcall(opts.Preview, w.Name, skin.Name)
+			if not ok or typeof(model) ~= "Instance" or not vp.Parent then
+				if ok and typeof(model) == "Instance" then model:Destroy() end
+				if img.Parent then img.Visible = true end
+				return
+			end
+			model.Parent = vp
+			local bcf, size
+			if model:IsA("Model") then bcf, size = model:GetBoundingBox()
+			elseif model:IsA("BasePart") then bcf, size = model.CFrame, model.Size end
+			if not bcf then img.Visible = true return end
+			-- longest axis runs across the card, the thinnest one faces the camera
+			local axes = {{bcf.RightVector, size.X}, {bcf.UpVector, size.Y}, {bcf.LookVector, size.Z}}
+			table.sort(axes, function(a, b) return a[2] > b[2] end)
+			local long, mid, thin = axes[1], axes[2], axes[3]
+			center, up, side = bcf.Position, mid[1], thin[1]
+			local aspect = math.max(art.AbsoluteSize.X, 1) / math.max(art.AbsoluteSize.Y, 1)
+			local vHalf = math.rad(cam.FieldOfView) / 2
+			local hHalf = math.atan(math.tan(vHalf) * aspect)
+			dist = math.max((long[2] / 2) / math.tan(hHalf), (mid[2] / 2) / math.tan(vHalf)) * 1.12 + thin[2] / 2
+			place()
+		end)
+		local conn
+		function state.spin(on)
+			if on and not conn then
+				conn = RunService.RenderStepped:Connect(function(dt)
+					if not vp.Parent then conn:Disconnect() conn = nil return end
+					state.angle += dt * 1.6
+					place()
+				end)
+			elseif not on and conn then
+				conn:Disconnect()
+				conn = nil
+				state.angle = 0
+				place()
+			end
+		end
+		return state
+	end
+
+	function buildCards()
+		for _, v in ipairs(cardViews) do v.Card:Destroy() end
+		cardViews = {}
+		local w = st.weapon and findWeapon(st.weapon)
+		local skins = w and w.Skins or {}
+		local cw, ch = cellSize()
+		gridLayout.CellSize = UDim2.fromOffset(cw, ch)
+		local shown = 0
+		for i, skin in ipairs(skins) do
+			if not st.rarity or skin.Rarity == st.rarity then
+				shown += 1
+				local rc = rarityColor[skin.Rarity] or CURRENT_THEME.SubText
+				local card = create("TextButton", {
+					Text = "", AutoButtonColor = false, BorderSizePixel = 0, ClipsDescendants = true,
+					LayoutOrder = i, Parent = grid,
+				}, {corner(6)})
+				local s = create("UIStroke", {ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = card})
+				local art = create("Frame", {
+					BackgroundColor3 = rc, BackgroundTransparency = 0.88, BorderSizePixel = 0,
+					Size = UDim2.new(1, 0, 0, ch - 62), Parent = card,
+				}, {create("UIGradient", {
+					Rotation = 90,
+					Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.6), NumberSequenceKeypoint.new(1, 0)}),
+				})})
+				local img = create("ImageLabel", {
+					Image = asset(skin.Image or w.Icon or ""), BackgroundTransparency = 1, ScaleType = Enum.ScaleType.Fit,
+					Size = UDim2.fromScale(0.8, 0.8), Position = UDim2.fromScale(0.5, 0.52), AnchorPoint = Vector2.new(0.5, 0.5),
+					ZIndex = 2, Visible = not opts.Preview, Parent = art,
+				})
+				local view = opts.Preview and preview(art, img, w, skin) or nil
+				label({
+					Text = w.Name, FontFace = FONTS.Mono, TextSize = 11, Role = "SubText", TextTruncate = TRUNC,
+					Size = UDim2.new(1, -16, 0, 14), Position = UDim2.new(0, 9, 1, -58), Parent = card,
+				})
+				label({
+					Text = skin.Display or skin.Name, FontFace = FONTS.BodySemi, TextSize = 14, TextTruncate = TRUNC,
+					Size = UDim2.new(1, -16, 0, 18), Position = UDim2.new(0, 9, 1, -43), Parent = card,
+				})
+				create("TextLabel", {
+					Text = skin.Label or skin.Rarity or "", FontFace = FONTS.Body, TextSize = 12, TextColor3 = rc,
+					BackgroundTransparency = 1, TextXAlignment = LEFT, TextTruncate = TRUNC,
+					Size = UDim2.new(1, -16, 0, 14), Position = UDim2.new(0, 9, 1, -23), Parent = card,
+				})
+				create("Frame", {
+					BackgroundColor3 = rc, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 3),
+					Position = UDim2.fromScale(0, 1), AnchorPoint = Vector2.new(0, 1), ZIndex = 2, Parent = card,
+				})
+				local tag = create("Frame", {
+					BorderSizePixel = 0, AutomaticSize = AX, Size = UDim2.fromOffset(0, 18),
+					Position = UDim2.new(1, -6, 0, 6), AnchorPoint = Vector2.new(1, 0), ZIndex = 3, Parent = card,
+				}, {corner(4), padding(0, 7)})
+				local tagText = create("TextLabel", {
+					Text = "Equipped", FontFace = FONTS.BodySemi, TextSize = 11, BackgroundTransparency = 1,
+					AutomaticSize = AX, Size = UDim2.fromScale(0, 1), ZIndex = 3, Parent = tag,
+				})
+				local badges = create("Frame", {
+					BackgroundTransparency = 1, Size = UDim2.new(0.6, 0, 0, 16), Position = UDim2.fromOffset(6, 7),
+					ZIndex = 3, Parent = card,
+				}, {list(3, H)})
+				-- opts.Customize: a button on the equipped card (its own click, the card's pick stays)
+				local custom
+				if opts.Customize then
+					custom = create("TextButton", {
+						Text = opts.Customize.Text or "Customize", FontFace = FONTS.BodySemi, TextSize = 12, AutoButtonColor = false,
+						AutomaticSize = AX, Size = UDim2.fromOffset(0, 24), BorderSizePixel = 0, Visible = false,
+						Position = UDim2.new(1, -7, 1, -7), AnchorPoint = Vector2.new(1, 1), ZIndex = 4, Parent = art,
+					}, {corner(12), padding(0, 11)})
+					local cs = create("UIStroke", {ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Thickness = 1, Parent = custom})
+					local hot = false
+					local function paintCustom()
+						local T = CURRENT_THEME
+						tween(custom, {BackgroundColor3 = hot and T.Accent or T.PageBg, BackgroundTransparency = hot and 0 or 0.08,
+							TextColor3 = hot and T.Knob or T.Accent}, FAST)
+						cs.Color = T.Accent
+					end
+					restyle(custom, paintCustom)
+					custom.MouseEnter:Connect(function() hot = true paintCustom() end)
+					custom.MouseLeave:Connect(function() hot = false paintCustom() end)
+					custom.MouseButton1Click:Connect(function()
+						playSound("Click")
+						filterList.Visible = false
+						if opts.Customize.Callback then
+							pcall(opts.Customize.Callback, w.Name, skin.Name, st.team == BOTH and "Both" or st.team)
+						end
+					end)
+				end
+				local v = {Card = card, Stroke = s, Art = art, Image = img, Tag = tag, TagText = tagText, Badges = badges, Weapon = w.Name, Skin = skin, Custom = custom}
+				table.insert(cardViews, v)
+				restyle(card, function() paintCard(v) end)
+				card.MouseEnter:Connect(function()
+					v.Hover = true
+					paintCard(v)
+					tween(img, {Size = UDim2.fromScale(0.88, 0.88)}, MED)
+					if view then view.spin(true) end
+				end)
+				card.MouseLeave:Connect(function()
+					v.Hover = false
+					paintCard(v)
+					tween(img, {Size = UDim2.fromScale(0.8, 0.8)}, MED)
+					if view then view.spin(false) end
+				end)
+				card.MouseButton1Click:Connect(function()
+					playSound("Click")
+					filterList.Visible = false
+					local clear = pickedSkin(w.Name) == skin.Name
+					local targets = {}
+					if st.team == BOTH then
+						for _, t in ipairs(teams) do table.insert(targets, t.Id) end
+					else
+						targets[1] = st.team
+					end
+					for _, id in ipairs(targets) do
+						el.Value[id] = el.Value[id] or {}
+						el.Value[id][w.Name] = (not clear) and skin.Name or nil
+					end
+					el:Set(el.Value, false, {Team = st.team == BOTH and "Both" or st.team, Weapon = w.Name, Skin = (not clear) and skin.Name or nil})
+				end)
+			end
+		end
+		grid.CanvasPosition = Vector2.zero
+		empty.Visible = shown == 0 and #skins > 0
+		local n = #skins
+		title.Text = st.weapon or "Pick a weapon"
+		count.Text = st.weapon and (n == 1 and "1 skin" or (n .. " skins")) or ""
+	end
+
+	local function paintWeapon(v)
+		local T = CURRENT_THEME
+		local on = v.Name == st.weapon
+		v.Button.BackgroundColor3 = T.PageBg
+		v.Button.BackgroundTransparency = on and 0 or 1
+		v.Text.TextColor3 = on and T.Text or T.SubText
+		v.Icon.ImageColor3 = on and T.Text or T.SubText
+		v.Under.Visible = on
+		v.Under.BackgroundColor3 = T.Accent
+		local has = false
+		for _, t in ipairs(teams) do
+			if st.team == BOTH or st.team == t.Id then
+				if el.Value[t.Id] and el.Value[t.Id][v.Name] then has = true end
+			end
+		end
+		v.Dot.Visible = has
+		v.Dot.BackgroundColor3 = T.Accent
+	end
+
+	local function buildWeapons()
+		for _, v in pairs(weaponViews) do v.Button:Destroy() end
+		weaponViews = {}
+		local c = currentCategory()
+		for i, w in ipairs(c and c.Weapons or {}) do
+			local b = create("TextButton", {
+				Text = "", AutoButtonColor = false, BorderSizePixel = 0, Size = UDim2.fromOffset(98, STRIP_H - 10),
+				LayoutOrder = i, Parent = strip,
+			}, {corner(5)})
+			local icon = create("ImageLabel", {
+				Image = asset(w.Icon or ""), BackgroundTransparency = 1, ScaleType = Enum.ScaleType.Fit,
+				Size = UDim2.fromOffset(74, 26), Position = UDim2.new(0.5, 0, 0, 6), AnchorPoint = Vector2.new(0.5, 0), Parent = b,
+			})
+			local t = create("TextLabel", {
+				Text = w.Name, FontFace = FONTS.Body, TextSize = 12, BackgroundTransparency = 1, TextTruncate = TRUNC,
+				Size = UDim2.new(1, -8, 0, 16), Position = UDim2.new(0.5, 0, 0, 35), AnchorPoint = Vector2.new(0.5, 0), Parent = b,
+			})
+			local under = create("Frame", {
+				BorderSizePixel = 0, Size = UDim2.new(1, -36, 0, 2), Position = UDim2.new(0.5, 0, 1, 0),
+				AnchorPoint = Vector2.new(0.5, 1), Parent = b,
+			}, {corner(1)})
+			local dot = create("Frame", {
+				BorderSizePixel = 0, Size = UDim2.fromOffset(6, 6), Position = UDim2.new(1, -7, 0, 7),
+				AnchorPoint = Vector2.new(1, 0), Parent = b,
+			}, {corner(3)})
+			local v = {Name = w.Name, Button = b, Icon = icon, Text = t, Under = under, Dot = dot}
+			weaponViews[w.Name] = v
+			restyle(b, function() paintWeapon(v) end)
+			b.MouseButton1Click:Connect(function()
+				if st.weapon == w.Name then return end
+				playSound("Click")
+				st.weapon = w.Name
+				for _, o in pairs(weaponViews) do paintWeapon(o) end
+				buildCards()
+			end)
+		end
+		strip.CanvasPosition = Vector2.zero
+	end
+
+	local function paintChip(v)
+		local T = CURRENT_THEME
+		local on = v.Index == st.cat
+		v.Button.BackgroundColor3 = T.Accent
+		v.Button.BackgroundTransparency = on and 0.86 or 1
+		v.Button.TextColor3 = on and T.Text or T.SubText
+		v.Stroke.Color = on and T.Accent or T.Rule2
+		v.Stroke.Transparency = on and 0 or 0.2
+	end
+	local function selectCategory(i)
+		st.cat = i
+		local c = cats[i]
+		st.weapon = c and c.Weapons and c.Weapons[1] and c.Weapons[1].Name or nil
+		for _, v in ipairs(chipViews) do paintChip(v) end
+		buildWeapons()
+		buildCards()
+	end
+	local function buildChips()
+		for _, v in ipairs(chipViews) do v.Button:Destroy() end
+		chipViews = {}
+		for i, c in ipairs(cats) do
+			local b = create("TextButton", {
+				Text = c.Name, FontFace = FONTS.Body, TextSize = 15, AutoButtonColor = false, BorderSizePixel = 0,
+				AutomaticSize = AX, Size = UDim2.fromOffset(0, 34), LayoutOrder = i, Parent = catRow,
+			}, {corner(6), padding(0, 18)})
+			local s = create("UIStroke", {ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b})
+			local v = {Index = i, Button = b, Stroke = s}
+			table.insert(chipViews, v)
+			restyle(b, function() paintChip(v) end)
+			b.MouseButton1Click:Connect(function()
+				if st.cat == i then return end
+				playSound("Click")
+				selectCategory(i)
+			end)
+		end
+	end
+
+	-- repaint selection state after a team switch
+	function el:_refresh()
+		for _, v in pairs(weaponViews) do paintWeapon(v) end
+		for _, v in ipairs(cardViews) do paintCard(v) end
+	end
+
+	function el:Set(v, silent, change)
+		local clean = blank()
+		if type(v) == "table" then
+			for _, t in ipairs(teams) do
+				if type(v[t.Id]) == "table" then
+					for weapon, skin in pairs(v[t.Id]) do
+						if type(weapon) == "string" and type(skin) == "string" then clean[t.Id][weapon] = skin end
+					end
+				end
+			end
+		end
+		self.Value = clean
+		Library.Flags[self.Flag] = clean
+		touch()
+		for _, wv in pairs(weaponViews) do paintWeapon(wv) end
+		for _, cv in ipairs(cardViews) do paintCard(cv) end
+		if not silent then self.Callback(clean, change) end
+	end
+
+	function el:Get(team, weapon)
+		local t = self.Value[team or teams[1].Id]
+		return t and t[weapon]
+	end
+
+	function el:Select(team, weapon, skin)
+		self.Value[team] = self.Value[team] or {}
+		self.Value[team][weapon] = skin
+		self:Set(self.Value, false, {Team = team, Weapon = weapon, Skin = skin})
+	end
+
+	-- jump to one weapon's skins (its category, its strip button, its grid); the page also scrolls the
+	-- picker into view unless keepPage is true (e.g. when following the held weapon automatically)
+	function el:ShowWeapon(name, keepPage)
+		for i, c in ipairs(cats) do
+			for _, w in ipairs(c.Weapons or {}) do
+				if w.Name == name then
+					if not (st.cat == i and st.weapon == name) then -- already showing it: nothing to rebuild
+						if st.cat ~= i then
+							st.cat = i
+							for _, v in ipairs(chipViews) do paintChip(v) end
+							buildWeapons()
+						end
+						st.weapon = name
+						for _, v in pairs(weaponViews) do paintWeapon(v) end
+						buildCards()
+					end
+					local scale = window:_uiScale()
+					local wv = weaponViews[name]
+					if wv then
+						local x = (wv.Button.AbsolutePosition.X - strip.AbsolutePosition.X) / scale + strip.CanvasPosition.X
+						strip.CanvasPosition = Vector2.new(math.max(0, x - 40), 0)
+					end
+					local page = not keepPage and self.Tab and self.Tab.Page
+					if page and page:IsA("ScrollingFrame") then
+						local y = (f.AbsolutePosition.Y - page.AbsolutePosition.Y) / scale + page.CanvasPosition.Y
+						tween(page, {CanvasPosition = Vector2.new(0, math.max(0, y - 12))}, MED)
+					end
+					return true
+				end
+			end
+		end
+		return false
+	end
+
+	-- swap in a new catalogue (e.g. once the game's skin list has loaded); picks are kept
+	function el:SetCategories(newCats)
+		cats = newCats or {}
+		local keep = st.weapon
+		buildChips()
+		local ci = 1
+		if keep then
+			for i, c in ipairs(cats) do
+				for _, w in ipairs(c.Weapons or {}) do
+					if w.Name == keep then ci = i end
+				end
+			end
+		end
+		st.cat = ci
+		for _, v in ipairs(chipViews) do paintChip(v) end
+		buildWeapons()
+		local c = cats[ci]
+		st.weapon = (keep and findWeapon(keep) and keep) or (c and c.Weapons and c.Weapons[1] and c.Weapons[1].Name) or nil
+		for _, v in pairs(weaponViews) do paintWeapon(v) end
+		buildCards()
+	end
+
+	buildChips()
+	selectCategory(1)
+	if multi then paintTeams() end
+	paintFilter()
+	task.defer(layoutGrid)
+	return el
+end
+
+-- ---------------------------------------------------------------------------
+-- HERO ELEMENT (one item shown big with its name; e.g. the head of a customize panel)
+--   local hero = Tab:AddHero({Height = 170})
+--   hero:Set({Title = "Revolver", Name = "Peppermint Sheriff", Label = "Legendary", Color = c, Image = id,
+--             Model = function() return model end,   -- optional: a 3D model shown (slowly turning) instead of the image
+--             Upright = true})  -- keep the model standing (characters): up stays up, it turns around its own vertical axis
+-- ---------------------------------------------------------------------------
+-- camera placement for a model: longest axis across the frame, thinnest one facing the camera
+local function frameModel(model, aspect, fov)
+	local bcf, size
+	if model:IsA("Model") then bcf, size = model:GetBoundingBox()
+	elseif model:IsA("BasePart") then bcf, size = model.CFrame, model.Size end
+	if not bcf then return nil end
+	local axes = {{bcf.RightVector, size.X}, {bcf.UpVector, size.Y}, {bcf.LookVector, size.Z}}
+	table.sort(axes, function(a, b) return a[2] > b[2] end)
+	local long, mid, thin = axes[1], axes[2], axes[3]
+	local vHalf = math.rad(fov) / 2
+	local hHalf = math.atan(math.tan(vHalf) * aspect)
+	local dist = math.max((long[2] / 2) / math.tan(hHalf), (mid[2] / 2) / math.tan(vHalf)) * 1.15 + thin[2] / 2
+	return {center = bcf.Position, up = mid[1], side = thin[1], dist = dist}
+end
+-- camera placement for a standing model (a character): its up axis stays up, the camera starts in front of it
+local function frameUpright(model, aspect, fov)
+	local bcf, size
+	if model:IsA("Model") then bcf, size = model:GetBoundingBox()
+	elseif model:IsA("BasePart") then bcf, size = model.CFrame, model.Size end
+	if not bcf then return nil end
+	local vHalf = math.rad(fov) / 2
+	local hHalf = math.atan(math.tan(vHalf) * aspect)
+	local width = math.max(size.X, size.Z)
+	local dist = math.max((size.Y / 2) / math.tan(vHalf), (width / 2) / math.tan(hHalf)) * 1.12 + width / 2
+	return {center = bcf.Position, up = bcf.UpVector, side = bcf.LookVector, dist = dist}
+end
+function Tab:AddHero(opts)
+	opts = opts or {}
+	local ART_H = opts.Height or 170
+	local el = {Type = "Hero"}
+	local f = block(self, ART_H + 80)
+	el.Frame = f
+	f:FindFirstChild("Rule").Visible = false
+	local art = make("Frame", {
+		Size = UDim2.new(1, -PAD * 2, 0, ART_H), Position = UDim2.fromOffset(PAD, 8), BorderSizePixel = 0,
+		ClipsDescendants = true, Parent = f,
+	}, {BackgroundColor3 = "PageRaised"}, {corner(8), stroke("Rule2", 1, 0.35)})
+	local glow = create("Frame", {
+		BackgroundTransparency = 0.78, BorderSizePixel = 0, Size = UDim2.fromScale(1, 1), Parent = art,
+	}, {create("UIGradient", {
+		Rotation = 90, Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 0.15)}),
+	})})
+	local img = create("ImageLabel", {
+		BackgroundTransparency = 1, ScaleType = Enum.ScaleType.Fit, Size = UDim2.fromScale(0.82, 0.82),
+		Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5), ZIndex = 2, Parent = art,
+	})
+	local vp = create("ViewportFrame", {
+		BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1), ZIndex = 2, Visible = false,
+		Ambient = Color3.fromRGB(170, 170, 170), LightColor = Color3.new(1, 1, 1), LightDirection = Vector3.new(-0.4, -1, -0.6),
+		Parent = art,
+	})
+	local cam = Instance.new("Camera")
+	cam.FieldOfView = 30
+	cam.Parent = vp
+	vp.CurrentCamera = cam
+	local bar = create("Frame", {
+		BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 3), Position = UDim2.fromScale(0, 1), AnchorPoint = Vector2.new(0, 1),
+		ZIndex = 3, Parent = art,
+	})
+	local title = label({
+		Text = "", FontFace = FONTS.Mono, TextSize = 11, Role = "SubText", TextTruncate = TRUNC,
+		Size = UDim2.new(1, -PAD * 2, 0, 14), Position = UDim2.fromOffset(PAD, ART_H + 18), Parent = f,
+	})
+	local name = label({
+		Text = "", FontFace = FONTS.Heading, TextSize = 19, TextTruncate = TRUNC,
+		Size = UDim2.new(1, -PAD * 2, 0, 24), Position = UDim2.fromOffset(PAD, ART_H + 33), Parent = f,
+	})
+	local sub = create("TextLabel", {
+		Text = "", FontFace = FONTS.Body, TextSize = 12, BackgroundTransparency = 1, TextXAlignment = LEFT, TextTruncate = TRUNC,
+		Size = UDim2.new(1, -PAD * 2, 0, 14), Position = UDim2.fromOffset(PAD, ART_H + 59), Parent = f,
+	})
+	local shot, model, token, angle = nil, nil, 0, 0
+	local function place()
+		if not shot then return end
+		local dir = CFrame.fromAxisAngle(shot.up, angle):VectorToWorldSpace(shot.side)
+		cam.CFrame = CFrame.lookAt(shot.center + dir * shot.dist, shot.center, shot.up)
+	end
+	local conn
+	conn = RunService.RenderStepped:Connect(function(dt)
+		if not f.Parent then conn:Disconnect() return end
+		if shot and vp.Visible and art.AbsoluteSize.X > 0 then
+			angle += dt * (opts.Spin or 0.5)
+			place()
+		end
+	end)
+	local function paintColor()
+		local c = el.Info and el.Info.Color or CURRENT_THEME.Accent
+		glow.BackgroundColor3 = c
+		bar.BackgroundColor3 = c
+		sub.TextColor3 = c
+	end
+	restyle(f, paintColor)
+	function el:Set(info)
+		info = info or {}
+		self.Info = info
+		title.Text = info.Title or ""
+		name.Text = info.Name or ""
+		sub.Text = info.Label or ""
+		img.Image = asset(info.Image or "")
+		paintColor()
+		token += 1
+		local mine = token
+		if model then model:Destroy() model = nil end
+		shot = nil
+		vp.Visible, img.Visible = false, true
+		if type(info.Model) ~= "function" then return end
+		task.spawn(function()
+			local ok, m = pcall(info.Model)
+			if not (ok and typeof(m) == "Instance") then return end
+			if mine ~= token or not vp.Parent then m:Destroy() return end
+			model = m
+			m.Parent = vp
+			local aspect = math.max(art.AbsoluteSize.X, 1) / math.max(art.AbsoluteSize.Y, 1)
+			shot = (info.Upright and frameUpright or frameModel)(m, aspect, cam.FieldOfView)
+			if not shot then return end
+			angle = 0
+			place()
+			vp.Visible, img.Visible = true, false
+		end)
+	end
+	return el
+end
+
+-- ---------------------------------------------------------------------------
+-- GALLERY ELEMENT (a searchable grid of picture tiles: one pick, or none)
+--   local g = Tab:AddGallery({
+--     Name = "Wrap", Height = 230, TileSize = 74, NoneText = "None", Search = true,
+--     Items = {{Name = "Red Rubber", Image = id, Color = rarityColor, View = function() return guiObject end}},
+--     Callback = function(name) end,   -- nil = None
+--   })
+--   g:SetItems(items, value)   g:Set(name, silent)   g:SetTitle(text)   g.Value
+-- View (optional) builds a tile's picture (e.g. a ViewportFrame) the first time the tile scrolls into view.
+-- Not saved with configs: the script keeps the picks.
+-- ---------------------------------------------------------------------------
+function Tab:AddGallery(opts)
+	opts = opts or {}
+	local window = self.Window
+	local TILE, GRID_H, GAP_G, LABEL_H = opts.TileSize or 74, opts.Height or 230, 6, 18
+	local HEAD_H, SEARCH_H = 34, opts.Search == false and 0 or 34
+	local el = {Type = "Gallery", Value = opts.Value, Callback = opts.Callback or function() end}
+	local f = block(self, HEAD_H + SEARCH_H + GRID_H + 14)
+	el.Frame = f
+	local title = label({
+		Text = opts.Name or "", FontFace = FONTS.BodySemi, TextSize = 14, AutomaticSize = AX,
+		Size = UDim2.fromOffset(0, HEAD_H), Position = UDim2.fromOffset(PAD, 4), Parent = f,
+	})
+	local current = label({
+		Text = "", FontFace = FONTS.Italic, TextSize = 13, Role = "Accent", TextXAlignment = RIGHT, TextTruncate = TRUNC,
+		Size = UDim2.new(0.62, -PAD, 0, HEAD_H), Position = UDim2.new(1, -PAD, 0, 4), AnchorPoint = Vector2.new(1, 0), Parent = f,
+	})
+	local box
+	if SEARCH_H > 0 then
+		local holder = create("Frame", {
+			BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, SEARCH_H), Position = UDim2.fromOffset(0, HEAD_H + 2), Parent = f,
+		})
+		box = searchField(holder, 0)
+		box.PlaceholderText = "Search " .. string.lower(opts.Name or "") .. "..."
+	end
+	local grid = make("ScrollingFrame", {
+		BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3, CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = AY, Size = UDim2.new(1, -PAD * 2 + 10, 0, GRID_H),
+		Position = UDim2.fromOffset(PAD - 4, HEAD_H + SEARCH_H + 8), Parent = f,
+	}, {ScrollBarImageColor3 = "Rule2"}, {create("UIPadding", {
+		PaddingLeft = UDim.new(0, 4), PaddingRight = UDim.new(0, 8), PaddingTop = UDim.new(0, 2), PaddingBottom = UDim.new(0, 4),
+	})})
+	local layout = create("UIGridLayout", {
+		CellPadding = UDim2.fromOffset(GAP_G, GAP_G), CellSize = UDim2.fromOffset(TILE, TILE + LABEL_H),
+		SortOrder = Enum.SortOrder.LayoutOrder, Parent = grid,
+	})
+	local empty = label({
+		Text = "Nothing matches.", FontFace = FONTS.Italic, TextSize = 13, Role = "SubText", TextXAlignment = CENTER,
+		Visible = false, Size = UDim2.new(1, 0, 0, 40), Position = UDim2.fromOffset(0, HEAD_H + SEARCH_H + 30), Parent = f,
+	})
+	local items = opts.Items or {}
+	local tiles = {}
+
+	local function fit()
+		local w = grid.AbsoluteSize.X / window:_uiScale() - 14
+		if w <= 0 then return end
+		local cols = math.max(1, math.floor((w + GAP_G) / (TILE + GAP_G)))
+		local cw = math.floor((w - GAP_G * (cols - 1)) / cols)
+		layout.CellSize = UDim2.fromOffset(cw, cw + LABEL_H)
+	end
+	grid:GetPropertyChangedSignal("AbsoluteSize"):Connect(fit)
+
+	local function paintTile(t)
+		local T = CURRENT_THEME
+		local on = el.Value == t.Name
+		t.Button.BackgroundColor3 = on and T.PageBg:Lerp(T.Accent, 0.12) or T.PageRaised
+		t.Stroke.Color = on and T.Accent or (t.Hover and T.SubText or T.Rule2)
+		t.Stroke.Thickness = on and 2 or 1
+		t.Stroke.Transparency = on and 0 or (t.Hover and 0.2 or 0.45)
+		t.Label.TextColor3 = on and T.Text or T.SubText
+	end
+	local function paintAll() for _, t in ipairs(tiles) do paintTile(t) end end
+
+	-- pictures from View are made only for tiles near the visible part of the grid, a few per frame
+	local loading = false
+	local function loadVisible()
+		if loading then return end
+		loading = true
+		task.spawn(function()
+			while grid.Parent do
+				local top = grid.AbsolutePosition.Y - TILE
+				local bottom = grid.AbsolutePosition.Y + grid.AbsoluteSize.Y + TILE
+				local made = 0
+				for _, t in ipairs(tiles) do
+					if not t.Made and t.Item.View and t.Button.Visible then
+						local y = t.Button.AbsolutePosition.Y
+						if y >= top and y <= bottom then
+							t.Made = true
+							local ok, inst = pcall(t.Item.View)
+							if ok and typeof(inst) == "Instance" then
+								if inst:IsA("GuiObject") then
+									inst.Size, inst.Position, inst.AnchorPoint = UDim2.fromScale(1, 1), UDim2.new(), Vector2.zero
+									inst.BackgroundTransparency, inst.ZIndex = 1, 2
+								end
+								inst.Parent = t.Art
+								if t.Image then t.Image.Visible = false end
+							end
+							made += 1
+							if made >= 3 then break end
+						end
+					end
+				end
+				if made == 0 then break end
+				RunService.Heartbeat:Wait()
+			end
+			loading = false
+		end)
+	end
+	grid:GetPropertyChangedSignal("CanvasPosition"):Connect(loadVisible)
+	grid:GetPropertyChangedSignal("AbsoluteSize"):Connect(loadVisible)
+	f:GetPropertyChangedSignal("AbsolutePosition"):Connect(loadVisible)
+
+	local function filter()
+		local q = box and string.lower(box.Text) or ""
+		local shown = 0
+		for _, t in ipairs(tiles) do
+			local text = t.Item.None and "" or string.lower(t.Item.Display or t.Item.Name or "")
+			local vis = q == "" or (not t.Item.None and string.find(text, q, 1, true) ~= nil)
+			t.Button.Visible = vis
+			if vis then shown += 1 end
+		end
+		empty.Visible = shown == 0
+		grid.CanvasPosition = Vector2.zero
+		task.defer(loadVisible)
+	end
+	if box then box:GetPropertyChangedSignal("Text"):Connect(filter) end
+
+	local function build()
+		for _, t in ipairs(tiles) do t.Button:Destroy() end
+		tiles = {}
+		local entries = {{None = true}}
+		for _, it in ipairs(items) do table.insert(entries, it) end
+		for i, it in ipairs(entries) do
+			local b = create("TextButton", {
+				Text = "", AutoButtonColor = false, BorderSizePixel = 0, ClipsDescendants = true, LayoutOrder = i, Parent = grid,
+			}, {corner(6)})
+			local s = create("UIStroke", {ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b})
+			local art = create("Frame", {BackgroundTransparency = 1, Size = UDim2.new(1, 0, 1, -LABEL_H), Parent = b})
+			if it.Color then
+				create("Frame", {
+					BackgroundColor3 = it.Color, BackgroundTransparency = 0.84, BorderSizePixel = 0, Size = UDim2.fromScale(1, 1), Parent = art,
+				}, {create("UIGradient", {
+					Rotation = 90, Transparency = NumberSequence.new({NumberSequenceKeypoint.new(0, 0.85), NumberSequenceKeypoint.new(1, 0)}),
+				})})
+				create("Frame", {
+					BackgroundColor3 = it.Color, BorderSizePixel = 0, Size = UDim2.new(1, 0, 0, 2),
+					Position = UDim2.new(0, 0, 1, -LABEL_H), AnchorPoint = Vector2.new(0, 1), ZIndex = 3, Parent = b,
+				})
+			end
+			local image
+			if it.None then
+				local ring = make("Frame", {
+					BackgroundTransparency = 1, Size = UDim2.fromOffset(24, 24), Position = UDim2.fromScale(0.5, 0.5),
+					AnchorPoint = Vector2.new(0.5, 0.5), Parent = art,
+				}, nil, {corner(12), stroke("SubText", 2, 0.25)})
+				make("Frame", {
+					Size = UDim2.fromOffset(24, 2), Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5),
+					Rotation = -45, BorderSizePixel = 0, BackgroundTransparency = 0.25, Parent = ring,
+				}, {BackgroundColor3 = "SubText"})
+			else
+				image = create("ImageLabel", {
+					Image = asset(it.Image or ""), BackgroundTransparency = 1, ScaleType = Enum.ScaleType.Fit,
+					Size = UDim2.fromScale(0.78, 0.78), Position = UDim2.fromScale(0.5, 0.5), AnchorPoint = Vector2.new(0.5, 0.5),
+					ZIndex = 2, Visible = (it.Image or "") ~= "", Parent = art,
+				})
+			end
+			local lab = create("TextLabel", {
+				Text = it.None and (opts.NoneText or "None") or (it.Display or it.Name or ""), FontFace = FONTS.Body, TextSize = 11,
+				BackgroundTransparency = 1, TextTruncate = TRUNC,
+				Size = UDim2.new(1, -8, 0, LABEL_H - 2), Position = UDim2.new(0, 4, 1, -LABEL_H + 1), Parent = b,
+			})
+			local t = {Button = b, Stroke = s, Art = art, Image = image, Label = lab, Item = it, Name = it.Name}
+			table.insert(tiles, t)
+			restyle(b, function() paintTile(t) end)
+			b.MouseEnter:Connect(function() t.Hover = true paintTile(t) end)
+			b.MouseLeave:Connect(function() t.Hover = false paintTile(t) end)
+			b.MouseButton1Click:Connect(function()
+				if el.Value == t.Name then return end
+				playSound("Click")
+				el:Set(t.Name)
+			end)
+		end
+		fit()
+		filter()
+	end
+
+	function el:Set(v, silent)
+		self.Value = v
+		current.Text = v or (opts.NoneText or "None")
+		paintAll()
+		if not silent then pcall(self.Callback, v) end
+	end
+	function el:SetItems(newItems, value)
+		items = newItems or {}
+		self.Value = value
+		current.Text = value or (opts.NoneText or "None")
+		if box then box.Text = "" end
+		build()
+	end
+	function el:SetTitle(text) title.Text = tostring(text or "") end
+
+	current.Text = el.Value or (opts.NoneText or "None")
+	build()
+	return el
+end
+
+-- ---------------------------------------------------------------------------
+-- VIEWPORT ELEMENT (a live 3D preview, with optional tabs along the top)
+--   Tab:AddViewport({
+--     Flag = "PreviewTab", Tabs = {"Enemy", "Arms"}, Height = 230,
+--     Model = function(tab) return model end,   -- on build, on tab change and on :Refresh()
+--     Update = function(model, tab, dt) end,     -- every frame while the menu is open
+--     Spin = 0.6,                                -- radians a second, 0 to hold still
+--     TabsPerRow = 4,                            -- tabs per row; more start a new row below (default 4)
+--   })
+-- The selected tab is the element's value, so other controls can use
+-- DependsOn = {Flag = "PreviewTab", Values = {"Enemy"}} to show only under that tab.
+-- ---------------------------------------------------------------------------
+function Tab:AddViewport(opts)
+	local tabs = opts.Tabs or {}
+	local el = {Type = "Viewport", Value = opts.Default or tabs[1] or ""}
+	register(el, opts, self)
+	local PER_ROW = math.max(1, opts.TabsPerRow or 4)
+	local ROWS = math.ceil(#tabs / PER_ROW)
+	local TABS_H = #tabs > 0 and (ROWS * 36 + 6) or 8
+	local VIEW_H = opts.Height or 230
+	local f = block(self, TABS_H + VIEW_H + 12)
+	el.Frame = f
+	f.ClipsDescendants = false
+
+	local tabArea = create("Frame", {
+		BackgroundTransparency = 1, Size = UDim2.new(1, -PAD * 2, 0, ROWS * 36 - 6), Position = UDim2.fromOffset(PAD, 8), Parent = f,
+	}, {list(6)})
+	local tabRows = {}
+	for r = 1, ROWS do
+		tabRows[r] = create("Frame", {
+			BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 30), LayoutOrder = r, Parent = tabArea,
+		}, {list(6, H, {VerticalAlignment = Enum.VerticalAlignment.Center})})
+	end
+	local box = make("Frame", {
+		Size = UDim2.new(1, -PAD * 2, 0, VIEW_H), Position = UDim2.fromOffset(PAD, TABS_H),
+		BorderSizePixel = 0, ClipsDescendants = true, Parent = f,
+	}, {BackgroundColor3 = "PageRaised"}, {corner(6), stroke("Rule2", 1, 0.2)})
+	local vp = create("ViewportFrame", {
+		BackgroundTransparency = 1, Size = UDim2.fromScale(1, 1),
+		Ambient = Color3.fromRGB(170, 170, 170), LightColor = Color3.new(1, 1, 1), LightDirection = Vector3.new(-0.4, -1, -0.6),
+		Parent = box,
+	})
+	local empty = label({
+		Text = opts.EmptyText or "Nothing to preview yet.", FontFace = FONTS.Italic, TextSize = 13, Role = "SubText",
+		TextXAlignment = CENTER, Size = UDim2.fromScale(1, 1), Visible = false, Parent = box,
+	})
+	local cam = Instance.new("Camera")
+	cam.FieldOfView = 30
+	cam.Parent = vp
+	vp.CurrentCamera = cam
+
+	local model, center, dist = nil, Vector3.zero, 10
+	local angle = 0
+	local function place()
+		local dir = Vector3.new(math.sin(angle), 0.18, math.cos(angle)).Unit
+		cam.CFrame = CFrame.lookAt(center + dir * dist, center)
+	end
+
+	local building = 0
+	function el:Refresh()
+		building += 1
+		local token = building
+		task.spawn(function()
+			local ok, m = pcall(opts.Model or function() end, el.Value)
+			if token ~= building or not vp.Parent then
+				if ok and typeof(m) == "Instance" then m:Destroy() end
+				return
+			end
+			if model then model:Destroy() model = nil end
+			if not ok or typeof(m) ~= "Instance" then
+				empty.Visible = true
+				return
+			end
+			empty.Visible = false
+			model = m
+			m.Parent = vp
+			local cf, size
+			if m:IsA("Model") then cf, size = m:GetBoundingBox()
+			elseif m:IsA("BasePart") then cf, size = m.CFrame, m.Size end
+			if not cf then return end
+			-- back off until the whole bounding sphere fits the shorter side of the box
+			local aspect = math.max(box.AbsoluteSize.X, 1) / math.max(box.AbsoluteSize.Y, 1)
+			local half = math.rad(cam.FieldOfView) / 2
+			if aspect < 1 then half = math.atan(math.tan(half) * aspect) end
+			center = cf.Position
+			dist = (size.Magnitude / 2) / math.sin(half) * 1.04
+			place()
+		end)
+	end
+
+	local chips = {}
+	local function paintTab(c)
+		local T = CURRENT_THEME
+		local on = el.Value == c.Name
+		c.Button.BackgroundColor3 = T.Accent
+		c.Button.BackgroundTransparency = on and 0.86 or 1
+		c.Button.TextColor3 = on and T.Text or T.SubText
+		c.Stroke.Color = on and T.Accent or T.Rule2
+		c.Stroke.Transparency = on and 0 or 0.2
+	end
+	function el:Set(v, silent)
+		if #tabs > 0 and not table.find(tabs, v) then return end
+		self.Value = v
+		Library.Flags[self.Flag] = v
+		for _, c in ipairs(chips) do paintTab(c) end
+		notifyDeps(self.Flag)
+		self:Refresh()
+		if not silent then self.Callback(v) end
+	end
+	for i, name in ipairs(tabs) do
+		local b = create("TextButton", {
+			Text = name, FontFace = FONTS.Body, TextSize = 14, AutoButtonColor = false, BorderSizePixel = 0,
+			AutomaticSize = AX, Size = UDim2.fromOffset(0, 30), LayoutOrder = i, Parent = tabRows[math.ceil(i / PER_ROW)],
+		}, {corner(6), padding(0, 16)})
+		local s = create("UIStroke", {ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b})
+		local c = {Name = name, Button = b, Stroke = s}
+		table.insert(chips, c)
+		restyle(b, function() paintTab(c) end)
+		b.MouseButton1Click:Connect(function()
+			if el.Value == name then return end
+			playSound("Click")
+			el:Set(name)
+		end)
+	end
+
+	local spin = opts.Spin or 0.6
+	local conn
+	conn = RunService.RenderStepped:Connect(function(dt)
+		if not vp.Parent then conn:Disconnect() return end
+		local w = Library._window
+		if w and not w.Visible then return end
+		if not model then return end
+		if spin ~= 0 then
+			angle += dt * spin
+			place()
+		end
+		if opts.Update then pcall(opts.Update, model, el.Value, dt) end
+	end)
+
+	el:Refresh()
+	return el
+end
+
+-- ---------------------------------------------------------------------------
+-- CHIPS ELEMENT (a wrapping row of choices, like the skin picker's categories)
+--   Tab:AddChoiceChips({Flag = "Group", Options = {"A", "B"}, Default = "A", Callback = fn(v),
+--                 Marked = fn(option) -> bool})   -- a small dot on chips the script marks
+--   el:Refresh() repaints the marks after whatever Marked reads has changed.
+-- ---------------------------------------------------------------------------
+function Tab:AddChoiceChips(opts)
+	opts.Options = opts.Options or {}
+	local el = {Type = "Chips", Value = opts.Default or opts.Options[1]}
+	register(el, opts, self)
+	local f = block(self, 44)
+	el.Frame = f
+	f.AutomaticSize = AY
+	local holder = create("Frame", {
+		BackgroundTransparency = 1, Size = UDim2.new(1, -PAD * 2, 0, 0), AutomaticSize = AY,
+		Position = UDim2.fromOffset(PAD, 9), Parent = f,
+	}, {list(6, H, {Wraps = true, VerticalAlignment = Enum.VerticalAlignment.Center}),
+		create("UIPadding", {PaddingBottom = UDim.new(0, 9)})})
+	local views = {}
+	local function paintChip(v)
+		local T = CURRENT_THEME
+		local on = v.Option == el.Value
+		v.Button.BackgroundColor3 = T.Accent
+		v.Button.BackgroundTransparency = on and 0.86 or 1
+		v.Button.TextColor3 = on and T.Text or T.SubText
+		v.Stroke.Color = on and T.Accent or T.Rule2
+		v.Stroke.Transparency = on and 0 or 0.2
+		local marked = opts.Marked and opts.Marked(v.Option) and true or false
+		v.Dot.Visible = marked
+		v.Dot.BackgroundColor3 = T.Accent
+	end
+	for i, option in ipairs(opts.Options) do
+		local b = create("TextButton", {
+			Text = tostring(option), FontFace = FONTS.Body, TextSize = 13, AutoButtonColor = false, BorderSizePixel = 0,
+			AutomaticSize = AX, Size = UDim2.fromOffset(0, 26), LayoutOrder = i, Parent = holder,
+		}, {corner(5), padding(0, 13)})
+		local st = create("UIStroke", {ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Parent = b})
+		local dot = create("Frame", {
+			Size = UDim2.fromOffset(5, 5), Position = UDim2.new(1, 9, 0, 4), AnchorPoint = Vector2.new(1, 0),
+			BorderSizePixel = 0, Visible = false, Parent = b,
+		}, {corner(3)})
+		local v = {Option = option, Button = b, Stroke = st, Dot = dot}
+		table.insert(views, v)
+		restyle(b, function() paintChip(v) end)
+		b.MouseButton1Click:Connect(function()
+			if el.Value == option then return end
+			playSound("Click")
+			el:Set(option)
+		end)
+	end
+	function el:Refresh()
+		for _, v in ipairs(views) do paintChip(v) end
+	end
+	function el:Set(v, silent)
+		self.Value = v
+		Library.Flags[self.Flag] = v
+		notifyDeps(self.Flag)
+		touch()
+		self:Refresh()
+		if not silent then self.Callback(v) end
+	end
+	el:Set(el.Value, true)
+	return el
+end
+
+-- ---------------------------------------------------------------------------
+-- PLAYER LIST ELEMENT (a searchable, grouped list with one selection, like a scoreboard)
+--   local pl = Tab:AddPlayerList({
+--     Height = 260, ResetText = "Reset all" (false = no button), OnReset = fn(),
+--     Callback = fn(id),                      -- the selection changed (nil = nothing selected)
+--   })
+--   pl:SetGroups({{Title = "Enemies", Items = {{Id = "u1", Name = "Name", Color = c, Marked = true}}}})
+--   pl:Select(id, silent)   pl.Value (the selected id)
+-- Color is the little dot in front of the name, Marked puts an accent dot at the right end of the row.
+-- Rows are rebuilt only when the ids, names or groups change, so calling SetGroups often is cheap.
+-- Not saved with configs: the script keeps the data.
+-- ---------------------------------------------------------------------------
+function Tab:AddPlayerList(opts)
+	opts = opts or {}
+	local HEAD_H, ITEM_H, GROUP_H = 38, 26, 28
+	local LIST_H = opts.Height or 260
+	local RESET_H = opts.ResetText == false and 0 or 44
+	local el = {Type = "PlayerList", Value = nil, Hidden = true, Callback = opts.Callback or function() end}
+	local f = block(self, HEAD_H + LIST_H + RESET_H + 12)
+	el.Frame = f
+	local box = searchField(f, 0)
+	box.PlaceholderText = "Search players..."
+	box.Parent.Position = UDim2.fromOffset(0, 2)
+	local holder = make("Frame", {
+		Size = UDim2.new(1, -PAD * 2, 0, LIST_H), Position = UDim2.fromOffset(PAD, HEAD_H), BorderSizePixel = 0,
+		ClipsDescendants = true, Parent = f,
+	}, {BackgroundColor3 = "PageBg"}, {corner(5), stroke("Rule2", 1, 0.45)})
+	local scroll = make("ScrollingFrame", {
+		BackgroundTransparency = 1, BorderSizePixel = 0, ScrollBarThickness = 3, CanvasSize = UDim2.new(),
+		AutomaticCanvasSize = AY, Size = UDim2.fromScale(1, 1), Parent = holder,
+	}, {ScrollBarImageColor3 = "Rule2"}, {list(0), create("UIPadding", {
+		PaddingTop = UDim.new(0, 3), PaddingBottom = UDim.new(0, 3), PaddingRight = UDim.new(0, 4),
+	})})
+	local empty = label({
+		Text = "Nobody here.", FontFace = FONTS.Italic, TextSize = 13, Role = "SubText", TextXAlignment = CENTER,
+		Size = UDim2.new(1, 0, 0, 40), Position = UDim2.fromOffset(0, 14), Visible = false, Parent = holder,
+	})
+	if opts.ResetText ~= false then
+		local reset = make("TextButton", {
+			Text = opts.ResetText or "Reset all", FontFace = FONTS.BodySemi, TextSize = 13, AutoButtonColor = false,
+			BorderSizePixel = 0, Size = UDim2.new(1, -PAD * 2, 0, 30), Position = UDim2.new(0, PAD, 1, -(RESET_H - 6) + 2),
+			Parent = f,
+		}, {BackgroundColor3 = "PageRaised", TextColor3 = "SubText"}, {corner(5), stroke("Rule2", 1, 0.3)})
+		reset.MouseEnter:Connect(function() paint(reset, {TextColor3 = "Text"}) end)
+		reset.MouseLeave:Connect(function() paint(reset, {TextColor3 = "SubText"}) end)
+		reset.MouseButton1Click:Connect(function()
+			playSound("Click")
+			if opts.OnReset then pcall(opts.OnReset) end
+		end)
+	end
+
+	local groups, collapsed, rows, sig = {}, {}, {}, ""
+	local function paintRow(r)
+		local T = CURRENT_THEME
+		local on = el.Value == r.Id
+		r.Button.BackgroundColor3 = T.Accent
+		r.Button.BackgroundTransparency = on and 0.86 or (r.Hover and 0.94 or 1)
+		r.Label.TextColor3 = on and T.Text or T.SubText
+		r.Label.FontFace = on and FONTS.BodySemi or FONTS.Body
+		r.Dot.BackgroundColor3 = r.Item.Color or T.SubText
+		r.Mark.BackgroundColor3 = T.Accent
+		r.Mark.Visible = r.Item.Marked == true
+	end
+	local function paintAll() for _, r in ipairs(rows) do paintRow(r) end end
+	restyle(f, paintAll)
+
+	local function applyFilter()
+		local q = string.lower(box.Text or "")
+		local anyShown = false
+		for _, g in ipairs(rows.groups or {}) do
+			local shown = 0
+			for _, r in ipairs(g.Rows) do
+				local vis = q == "" or string.find(string.lower(r.Item.Name or ""), q, 1, true) ~= nil
+				r.Vis = vis
+				if vis then shown += 1 end
+			end
+			g.Header.Visible = shown > 0
+			local open = q ~= "" or not collapsed[g.Title]
+			for _, r in ipairs(g.Rows) do r.Button.Visible = r.Vis and open end
+			g.Chevron.Rotation = open and 0 or -90
+			if shown > 0 then anyShown = true end
+		end
+		empty.Visible = not anyShown
+	end
+	box:GetPropertyChangedSignal("Text"):Connect(applyFilter)
+
+	local function build()
+		for _, c in ipairs(scroll:GetChildren()) do
+			if c:IsA("GuiObject") then c:Destroy() end
+		end
+		rows = {groups = {}}
+		local order = 0
+		for _, g in ipairs(groups) do
+			order += 1
+			local head = create("TextButton", {
+				Text = "", AutoButtonColor = false, BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, GROUP_H),
+				LayoutOrder = order, Parent = scroll,
+			})
+			local chev = drawnChevron({Size = UDim2.fromOffset(14, GROUP_H), Position = UDim2.fromOffset(8, 0), Parent = head})
+			label({
+				Text = g.Title, FontFace = FONTS.BodySemi, TextSize = 13, TextTruncate = TRUNC,
+				Size = UDim2.new(1, -40, 1, 0), Position = UDim2.fromOffset(28, 0), Parent = head,
+			})
+			local gr = {Title = g.Title, Header = head, Chevron = chev, Rows = {}}
+			table.insert(rows.groups, gr)
+			head.MouseButton1Click:Connect(function()
+				playSound("Click")
+				collapsed[g.Title] = not collapsed[g.Title]
+				applyFilter()
+			end)
+			for _, item in ipairs(g.Items or {}) do
+				order += 1
+				local b = create("TextButton", {
+					Text = "", AutoButtonColor = false, BorderSizePixel = 0, BackgroundTransparency = 1,
+					Size = UDim2.new(1, 0, 0, ITEM_H), LayoutOrder = order, Parent = scroll,
+				}, {corner(3)})
+				local dot = create("Frame", {
+					Size = UDim2.fromOffset(6, 6), Position = UDim2.new(0, 26, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5),
+					BorderSizePixel = 0, Parent = b,
+				}, {corner(3)})
+				local lab = label({
+					Text = item.Name or "", FontFace = FONTS.Body, TextSize = 13, TextTruncate = TRUNC,
+					Size = UDim2.new(1, -62, 1, 0), Position = UDim2.fromOffset(40, 0), Parent = b,
+				})
+				local mark = create("Frame", {
+					Size = UDim2.fromOffset(5, 5), Position = UDim2.new(1, -12, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5),
+					BorderSizePixel = 0, Visible = false, Parent = b,
+				}, {corner(3)})
+				local r = {Id = item.Id, Item = item, Button = b, Label = lab, Dot = dot, Mark = mark, Vis = true}
+				table.insert(gr.Rows, r)
+				table.insert(rows, r)
+				b.MouseEnter:Connect(function() r.Hover = true paintRow(r) end)
+				b.MouseLeave:Connect(function() r.Hover = false paintRow(r) end)
+				b.MouseButton1Click:Connect(function()
+					playSound("Click")
+					el:Select(r.Id)
+				end)
+			end
+		end
+		paintAll()
+		applyFilter()
+	end
+
+	function el:Select(id, silent)
+		if self.Value == id then return end
+		self.Value = id
+		paintAll()
+		if not silent then self.Callback(id) end
+	end
+	function el:SetGroups(new)
+		groups = new or {}
+		local parts = {}
+		for _, g in ipairs(groups) do
+			table.insert(parts, "#" .. tostring(g.Title))
+			for _, it in ipairs(g.Items or {}) do table.insert(parts, tostring(it.Id) .. "=" .. tostring(it.Name)) end
+		end
+		local now = table.concat(parts, "|")
+		if now ~= sig then
+			sig = now
+			build()
+		else
+			-- same rows: just take the new colours and marks
+			local byId = {}
+			for _, g in ipairs(groups) do for _, it in ipairs(g.Items or {}) do byId[it.Id] = it end end
+			for _, r in ipairs(rows) do r.Item = byId[r.Id] or r.Item end
+			paintAll()
+		end
+		-- the selected one left: nothing is selected any more
+		if self.Value ~= nil then
+			local found = false
+			for _, g in ipairs(groups) do for _, it in ipairs(g.Items or {}) do if it.Id == self.Value then found = true end end end
+			if not found then self:Select(nil) end
+		end
+	end
+	return el
+end
+
+-- ---------------------------------------------------------------------------
+-- STATE ELEMENT (no control: a value the script keeps, saved and loaded with configs)
+--   local st = Tab:AddState({Flag = "MyData", Default = {}, Callback = fn(value)})
+--   Mutate st.Value and call st:Save() (auto-save) or st:Set(newValue).
+-- ---------------------------------------------------------------------------
+local function deepCopy(v)
+	if type(v) ~= "table" then return v end
+	local t = {}
+	for k, x in pairs(v) do t[k] = deepCopy(x) end
+	return t
+end
+function Tab:AddState(opts)
+	local el = {Type = "State", Value = deepCopy(opts.Default), Hidden = true}
+	register(el, opts, self)
+	el.Default = deepCopy(opts.Default)
+	function el:Set(v, silent)
+		self.Value = deepCopy(v) -- never share the Default table (or a caller's) with live state
+		Library.Flags[self.Flag] = self.Value
+		touch()
+		if not silent then self.Callback(self.Value) end
+	end
+	function el:Save()
+		Library.Flags[self.Flag] = self.Value
+		touch()
+	end
+	return el
+end
+
+-- ---------------------------------------------------------------------------
 -- PROGRESS BAR ELEMENT
 -- ---------------------------------------------------------------------------
 function Tab:AddProgressBar(opts)
 	local el = {Type = "ProgressBar", Value = opts.Default or 0}
 	local f = row((opts and opts.Parent) or self, 58)
+	el.Frame = f
 	label({
 		Text = opts.Name or "Progress", TextTruncate = TRUNC,
 		Size = UDim2.new(1, -80, 0, 18), Position = UDim2.fromOffset(PAD, 14), Parent = f,
@@ -4339,6 +6767,7 @@ function Tab:AddImageGrid(opts)
 				local id = tostring(item.Id or ("item" .. i))
 				local rarityText = item.Rarity or "Default"
 				local rarityCol = getReadableRarityColor(item.RarityColor or RARITY_COLORS[rarityText] or RARITY_COLORS.Default)
+				local rarCol = rarityCol
 				local isNone = (id == "None" or id == "__none")
 				local isEquipped = (id == el.Value) or (item.Equipped == true)
 
@@ -5347,7 +7776,7 @@ function Library:_openBindPopup(el, name)
 	local keyRow = create("Frame", {
 		BackgroundTransparency = 1, Size = UDim2.new(1, 0, 0, 58), LayoutOrder = 3, Parent = box,
 	}, {list(12, H, {VerticalAlignment = Enum.VerticalAlignment.Center})})
-	local keyBtn = keycap(bind.Key and bind.Key.Name or "—", keyRow, "Text")
+	local keyBtn = keycap(keyLabel(bind.Key), keyRow, "Text")
 	keyBtn.TextSize = 13
 	keyBtn.Size = UDim2.fromOffset(0, 30)
 	keyBtn.LayoutOrder = 1
@@ -5429,10 +7858,10 @@ function Library:_openBindPopup(el, name)
 
 	keyBtn.MouseButton1Click:Connect(function()
 		keyBtn.Text = "…"
-		hint.Text = "press a key (Esc cancels)"
+		hint.Text = "press a key or mouse button (Esc cancels)"
 		self:ListenForKey(function(key)
 			if key then bind.Key = key end
-			keyBtn.Text = bind.Key and bind.Key.Name or "—"
+			keyBtn.Text = keyLabel(bind.Key)
 			hint.Text = "click, then press a key"
 			commit()
 		end)
@@ -5720,7 +8149,8 @@ function Library:Serialize()
 	for flag, b in pairs(Library.Binds) do if not GLOBAL_FLAGS[flag] then binds[flag] = {Key = b.Key.Name, Mode = b.Mode} end end
 	local flags = {}
 	for flag, v in pairs(Library.Flags) do
-		if not GLOBAL_FLAGS[flag] then
+		local owner = Library.Elements[flag]
+		if not GLOBAL_FLAGS[flag] and not (owner and owner.NoSave) then
 			flags[flag] = (typeof(v) == "Color3") and toHex(v) or v
 		end
 	end
@@ -5733,7 +8163,7 @@ function Library:Apply(data)
 	for flag, v in pairs(data.flags or {}) do
 		if not GLOBAL_FLAGS[flag] then
 			local el = Library.Elements[flag]
-			if el and el.Type ~= "Keybind" then
+			if el and el.Type ~= "Keybind" and not el.NoSave then
 				el:Set(el.Type == "ColorPicker" and (fromHex(v) or el.Value) or v)
 				count += 1
 			end
@@ -5754,6 +8184,18 @@ function Library:Apply(data)
 	return count
 end
 
+function Library:AutoLoad()
+	local n = Storage.getAutoload()
+	if not n then return end
+	local data = Storage.load(n)
+	if not data then return end
+	local count = self:Apply(data)
+	self.ActiveConfig = n
+	if self.RefreshConfigList then self.RefreshConfigList() end
+	self:_refreshConfigStatus()
+	self:Notify({Title = "Config", Body = 'Auto-loaded "' .. n .. '" (' .. count .. ' features)', Type = "Success"})
+end
+
 function Library:SetAutoSave(v, animate)
 	self.AutoSave = v and true or false
 	Storage.setAutosave(self.AutoSave)
@@ -5770,25 +8212,11 @@ function Library:SetAutoSave(v, animate)
 	self:_refreshConfigStatus()
 end
 
-function Library:AutoLoad()
-	local n = Storage.getAutoload()
-	if not n and self.AutoSave then
-		n = "default"
-	end
-	if not n then return end
-	local data = Storage.load(n)
-	if not data then return end
-	local count = self:Apply(data)
-	self.ActiveConfig = n
-	if self.RefreshConfigList then self.RefreshConfigList() end
-	self:_refreshConfigStatus()
-	self:Notify({Title = "Config", Body = 'Auto-loaded "' .. n .. '" (' .. count .. ' features)', Type = "Success"})
-end
-
 function Library:AddConfigTab(name, icon)
 	local tab = self:AddTab(name or "Config", icon or Library.Icons.Config, true)
 	self.ConfigTab = tab
 
+	self:_executorSection(tab)
 	tab:AddSection("Current")
 	local nameRow = row(tab, 44)
 	label({
@@ -5831,18 +8259,16 @@ function Library:AddConfigTab(name, icon)
 			and ('Changes write to "' .. (self.ActiveConfig or "the active config") .. '" automatically.')
 			or "Nothing writes until you press Save."
 	end
-	local function updateUI(v, animate)
-		showAutoSave(v, animate)
+	local function setAutoSave(v, animate)
+		self.AutoSave = v and true or false
+		Storage.setAutosave(self.AutoSave)
+		showAutoSave(self.AutoSave, animate)
 		refreshNote()
+		self:_refreshConfigStatus()
 	end
-	self._updateAutoSaveUI = updateUI
-	self._refreshAutoSaveNote = refreshNote
-
-	asHit.MouseButton1Click:Connect(function()
-		playSound("Click")
-		self:SetAutoSave(not self.AutoSave, true)
-	end)
-	updateUI(self.AutoSave, false)
+	self._updateAutoSaveUI = function(v, animate) setAutoSave(v, animate) end
+	asHit.MouseButton1Click:Connect(function() playSound("Click"); self:SetAutoSave(not self.AutoSave, true) end)
+	setAutoSave(self.AutoSave, false)
 
 	tab:AddSection("Saved")
 	local listHolder = block(tab, 0) -- sits on the "Saved" sheet; holds one row per config
@@ -5922,7 +8348,7 @@ function Library:AddConfigTab(name, icon)
 			if Storage.load(n) then self:Notify({Title = "Config", Body = n .. " already exists.", Type = "Warning"}) return end
 			self._applying = true
 			for _, el in pairs(Library.Elements) do
-				if el.Set and el.Default ~= nil and not GLOBAL_FLAGS[el.Flag] then el:Set(el.Default) end
+				if el.Set and el.Default ~= nil and not GLOBAL_FLAGS[el.Flag] and not el.NoSave then el:Set(el.Default) end
 			end
 			Library.Binds = {}
 			for _, el in pairs(Library.Elements) do if el.RefreshBind then el:RefreshBind() end end
@@ -5945,11 +8371,7 @@ function Library:AddConfigTab(name, icon)
 			local n = getName(); if not n then return end
 			Storage.save(n, self:Serialize())
 			self.ActiveConfig = n
-			if not Storage.getAutoload() then
-				Storage.setAutoload(n)
-			end
 			refreshList()
-			self:_refreshConfigStatus()
 			self:Notify({Title = "Config Saved", Body = n .. " updated successfully.", Type = "Success"})
 		end,
 		Delete = function()
@@ -5958,16 +8380,13 @@ function Library:AddConfigTab(name, icon)
 			if self.ActiveConfig == n then self.ActiveConfig = nil end
 			if Storage.getAutoload() == n then Storage.setAutoload(nil) end
 			refreshList()
-			self:_refreshConfigStatus()
 			self:Notify({Title = "Config Deleted", Body = n .. " removed.", Type = "Info"})
 		end,
 		["Set Autoload"] = function()
 			local n = getName(); if not n then return end
 			if not Storage.load(n) then self:Notify({Title = "Config", Body = "Save " .. n .. " first.", Type = "Warning"}) return end
 			Storage.setAutoload(n)
-			self.ActiveConfig = n
 			refreshList()
-			self:_refreshConfigStatus()
 			self:Notify({Title = "Autoload Set", Body = n .. " will load on inject.", Type = "Success"})
 		end,
 		["Clear Autoload"] = function()
@@ -6022,6 +8441,85 @@ Please let us know if there is any issue with our scripts!
 		end,
 	})
 	return tab
+end
+
+-- ---------------------------------------------------------------------------
+-- TOOLTIPS & RISKY NAMES
+-- Any element takes Tooltip = "..." (shown after its row is hovered for a moment) and
+-- Risky = true (its name is drawn in the Warning colour, for options that are easier to notice).
+-- ---------------------------------------------------------------------------
+local TextService = game:GetService("TextService")
+local TOOLTIP_DELAY, TOOLTIP_MAX_W = 0.45, 260
+
+function Library:_tooltipView()
+	if self._tip and self._tip.Frame.Parent then return self._tip end
+	local frame = make("Frame", {
+		Name = "Tooltip", AutomaticSize = AY, Size = UDim2.fromOffset(TOOLTIP_MAX_W, 0), Visible = false,
+		BorderSizePixel = 0, ZIndex = 300, Parent = self.Gui,
+	}, {BackgroundColor3 = "ChromeRaised"}, {corner(5), stroke("Rule2", 1, 0.2), padding(7, 10)})
+	local text = label({
+		Text = "", TextSize = 12, TextWrapped = true, Role = "ChromeText", AutomaticSize = AY,
+		Size = UDim2.new(1, 0, 0, 0), ZIndex = 301, Parent = frame,
+	})
+	self._tip = {Frame = frame, Text = text}
+	return self._tip
+end
+
+function Library:_placeTooltip()
+	local tip = self._tip
+	if not (tip and tip.Frame.Visible) then return end
+	local m = UIS:GetMouseLocation()
+	local screen = self.Gui.AbsoluteSize
+	local size = tip.Frame.AbsoluteSize
+	local x = math.min(m.X + 14, screen.X - size.X - 8)
+	local y = m.Y + 18
+	if y + size.Y > screen.Y - 8 then y = m.Y - size.Y - 10 end
+	tip.Frame.Position = UDim2.fromOffset(math.max(8, x), math.max(8, y))
+end
+
+function Library:_attachTooltip(frame, text)
+	local hovering, token = false, 0
+	frame.MouseEnter:Connect(function()
+		hovering = true
+		token += 1
+		local mine = token
+		task.delay(TOOLTIP_DELAY, function()
+			if not hovering or mine ~= token or not self.Visible then return end
+			local tip = self:_tooltipView()
+			local width = TextService:GetTextSize(text, 12, Enum.Font.Gotham, Vector2.new(TOOLTIP_MAX_W - 20, 2000)).X
+			tip.Frame.Size = UDim2.fromOffset(math.min(TOOLTIP_MAX_W, width + 22), 0)
+			tip.Text.Text = text
+			tip.Frame.Visible = true
+			self:_placeTooltip()
+		end)
+	end)
+	frame.MouseMoved:Connect(function() self:_placeTooltip() end)
+	frame.MouseLeave:Connect(function()
+		hovering = false
+		token += 1
+		if self._tip then self._tip.Frame.Visible = false end
+	end)
+end
+
+for _, method in ipairs({"AddToggle", "AddSlider", "AddButton", "AddDropdown", "AddMultiDropdown", "AddTextbox", "AddColorPicker", "AddKeybind"}) do
+	local original = Tab[method]
+	Tab[method] = function(self, opts, ...)
+		local el = original(self, opts, ...)
+		if type(opts) == "table" and type(el) == "table" and el.Frame then
+			if type(opts.Tooltip) == "string" and opts.Tooltip ~= "" then
+				self.Window:_attachTooltip(el.Frame, opts.Tooltip)
+			end
+			if opts.Risky and opts.Name then
+				for _, d in ipairs(el.Frame:GetDescendants()) do
+					if d:IsA("TextLabel") and d.Text == opts.Name then
+						paint(d, {TextColor3 = "Warning"})
+						break
+					end
+				end
+			end
+		end
+		return el
+	end
 end
 
 -- ---------------------------------------------------------------------------
@@ -7020,7 +9518,23 @@ function Library:CreateSidePanel(title, opts)
 	return panel
 end
 
-Library.AddSidePanel = Library.CreateSidePanel
+-- Two widgets share each of these names. The arguments say which one is meant:
+--   AddChips{Items = ...}             read-only status chips (Glider)
+--   AddChips{Options = ...}           a row of choices, one picked (Tab:AddChoiceChips)
+--   AddSidePanel("Title", opts)       floating inspector with a 3D viewport (Library:CreateSidePanel)
+--   AddSidePanel{ShowFlag/Manual=..}  a page docked to the window's right edge (Library:AddPanel)
+do
+	local statusChips = Tab.AddChips
+	function Tab:AddChips(opts)
+		opts = opts or {}
+		if opts.Items == nil and opts.Options ~= nil then return self:AddChoiceChips(opts) end
+		return statusChips(self, opts)
+	end
+end
+function Library:AddSidePanel(a, b)
+	if type(a) == "table" and (a.ShowFlag ~= nil or a.Manual ~= nil) then return self:AddPanel(a) end
+	return self:CreateSidePanel(a, b)
+end
 
 function Library:SaveWindowSize()
 	if self.Main then
