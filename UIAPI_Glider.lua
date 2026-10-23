@@ -1759,6 +1759,36 @@ end
 -- ---------------------------------------------------------------------------
 -- SETTINGS TAB & CONTROLS
 -- ---------------------------------------------------------------------------
+-- Deletes the remembered choice for the current game (its GliderLoader/remember.json
+-- entry), so the loader shows its menu again instead of auto-launching.
+-- Saved keys are intentionally left alone. Returns 1 when an entry was removed.
+local function ForgetLoaderSession()
+	local removed = 0
+	if not HAS_FS then return removed end
+	local gameKey = tostring(game.GameId)
+	pcall(function()
+		local rememberPath = "GliderLoader/remember.json"
+		if not isfile(rememberPath) then return end
+		local raw = readfile(rememberPath)
+		local ok, data = pcall(HttpService.JSONDecode, HttpService, raw)
+		if not ok or type(data) ~= "table" then
+			pcall(function() delfile(rememberPath) end)
+			return
+		end
+		if data[gameKey] == nil then return end
+		data[gameKey] = nil
+		removed = 1
+		local empty = true
+		for _ in pairs(data) do empty = false break end
+		if empty then
+			pcall(function() delfile(rememberPath) end)
+		else
+			pcall(writefile, rememberPath, HttpService:JSONEncode(data))
+		end
+	end)
+	return removed
+end
+
 function Library:_buildSettingsTab(name, icon)
 	local tab = self:AddTab(name or "Settings", icon or Library.Icons.Settings, true)
 
@@ -1879,6 +1909,21 @@ function Library:_buildSettingsTab(name, icon)
 		Callback = function(v)
 			self:SetAntiAfk(v, false)
 			if not self.Unloaded then Storage.saveAntiAfk(v) end
+		end,
+	})
+	tab:AddSection("Session")
+	tab:AddButton({
+		Name = "Forget this script",
+		Danger = true,
+		Callback = function()
+			local ok, removed = pcall(ForgetLoaderSession)
+				if ok and (removed or 0) > 0 then
+					self:Notify({Title = "Session", Body = "Script forgotten. The loader menu will show again.", Type = "Success"})
+				elseif ok then
+					self:Notify({Title = "Session", Body = "No remembered choice found for this game.", Type = "Info"})
+				else
+					self:Notify({Title = "Session", Body = "Could not access saved files.", Type = "Error"})
+				end
 		end,
 	})
 	local unloadRow = tab:AddButton({
