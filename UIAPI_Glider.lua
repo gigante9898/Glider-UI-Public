@@ -758,8 +758,41 @@ function Storage.list()
 	table.sort(names)
 	return names
 end
+-- JSONEncode throws on Instances, functions and raw Roblox datatypes (a dropdown filled with
+-- players, a Color3 put in by hand). Drop the keys that cannot be stored instead of losing the
+-- whole config to a single one.
+local function jsonSafe(v, seen, depth)
+	local t = type(v)
+	if t == "string" or t == "number" or t == "boolean" then return v end
+	if t ~= "table" then return nil end
+	depth = depth or 0
+	if depth > 16 then return nil end
+	seen = seen or {}
+	if seen[v] then return nil end -- a cycle would recurse forever and kill the save
+	seen[v] = true
+	local out = {}
+	for k, x in pairs(v) do
+		-- JSON object keys must be strings: an Enum or Instance key would break the encode
+		if type(k) == "string" or type(k) == "number" then
+			local ok = jsonSafe(x, seen, depth + 1)
+			if ok ~= nil then out[k] = ok end
+		end
+	end
+	seen[v] = nil
+	return out
+end
 function Storage.save(name, tbl)
-	local raw = HttpService:JSONEncode(tbl)
+	if type(tbl) ~= "table" then return end
+	-- A save never deletes what it does not know about: flags that are missing from this
+	-- snapshot (widgets still being built, or a tab removed in this build) keep their old value.
+	local prev = Storage.load(name)
+	if prev and type(prev.flags) == "table" and type(tbl.flags) == "table" then
+		for k, v in pairs(prev.flags) do
+			if tbl.flags[k] == nil then tbl.flags[k] = v end
+		end
+	end
+	local ok, raw = pcall(function() return HttpService:JSONEncode(jsonSafe(tbl)) end)
+	if not ok or type(raw) ~= "string" then return end
 	if HAS_FS then pcall(writefile, configPath(name), raw) else Storage._mem[safeName(name)] = raw end
 end
 function Storage.load(name)
@@ -811,16 +844,31 @@ function Storage.getAutosave()
 	end
 	return Storage._autosave
 end
-function Storage.setAutosave(enabled)
+-- autosave.txt is written on every run (it mirrors whatever the menu currently has), so it
+-- cannot be trusted to mean "the user chose autosave on". Only an explicit toggle lands here.
+function Storage.getAutosaveChoice()
+	if HAS_FS then
+		local ok, n = pcall(function()
+			local p = Storage.Folder .. "/autosave_choice.txt"
+			return isfile(p) and readfile(p) or nil
+		end)
+		if ok and n and n ~= "" then return n == "1" or n == "true" end
+		return nil
+	end
+	return Storage._autosaveChoice
+end
+function Storage.setAutosave(enabled, explicit)
 	if HAS_FS then
 		pcall(function()
 			local val = enabled and "1" or "0"
 			if not isfolder(Storage.Folder) then makefolder(Storage.Folder) end
 			writefile(Storage.Folder .. "/autosave.txt", val)
 			writefile(hubGlobal() .. "/autosave.txt", val)
+			if explicit then writefile(Storage.Folder .. "/autosave_choice.txt", val) end
 		end)
 	else
 		Storage._autosave = enabled
+		if explicit then Storage._autosaveChoice = enabled end
 	end
 end
 
@@ -1270,12 +1318,20 @@ function Library.new(opts)
 		end
 	end
 
-	local savedAutoSave = Storage.getAutosave()
+	-- Autosave is OFF unless the script asks for it or the user turned it on himself:
+	-- armed by default it starts writing over a config while the menu is still being built.
+	local savedAutoSave = Storage.getAutosaveChoice()
 	if savedAutoSave ~= nil then
 		self.AutoSave = savedAutoSave
 	else
-		self.AutoSave = opts.AutoSave ~= false
+		self.AutoSave = opts.AutoSave == true
 	end
+
+	-- No autosave until the build is finished (see touch()). AutoLoad() clears it, and so does
+	-- any real click, so a script that never calls AutoLoad() still saves from the first tick
+	-- the user touches something.
+	self._building = true
+	task.delay(5, function() self._building = false end)
 
 	local autoCfg = Storage.getAutoload()
 	if autoCfg then
@@ -3590,7 +3646,7 @@ function Tab:_block(height) return block(self, height) end
 local autosaveToken = 0
 local function touch()
 	local w = Library._window
-	if not (w and w.AutoSave) or w._applying then return end
+	if not (w and w.AutoSave) or w._applying or w._building then return end
 	if not w.ActiveConfig then
 		w.ActiveConfig = Storage.getAutoload() or "default"
 		if not Storage.getAutoload() then
@@ -8164,8 +8220,14 @@ function Library:Apply(data)
 		if not GLOBAL_FLAGS[flag] then
 			local el = Library.Elements[flag]
 			if el and el.Type ~= "Keybind" and not el.NoSave then
-				el:Set(el.Type == "ColorPicker" and (fromHex(v) or el.Value) or v)
-				count += 1
+				-- One widget refusing its stored value must not abort the whole load and swallow
+				-- the success notification: isolate it, count it and keep going.
+				local ok, err = pcall(el.Set, el, el.Type == "ColorPicker" and (fromHex(v) or el.Value) or v)
+				if ok then
+					count += 1
+				else
+					print("[Glider] Apply skipped " .. tostring(flag) .. ":", err)
+				end
 			end
 		end
 	end
@@ -8185,6 +8247,7 @@ function Library:Apply(data)
 end
 
 function Library:AutoLoad()
+	self._building = false
 	local n = Storage.getAutoload()
 	if not n then return end
 	local data = Storage.load(n)
@@ -8198,7 +8261,8 @@ end
 
 function Library:SetAutoSave(v, animate)
 	self.AutoSave = v and true or false
-	Storage.setAutosave(self.AutoSave)
+	self._building = false
+	Storage.setAutosave(self.AutoSave, true)
 	if self.AutoSave and not self.ActiveConfig then
 		self.ActiveConfig = Storage.getAutoload() or "default"
 		if not Storage.getAutoload() then
@@ -8261,7 +8325,7 @@ function Library:AddConfigTab(name, icon)
 	end
 	local function setAutoSave(v, animate)
 		self.AutoSave = v and true or false
-		Storage.setAutosave(self.AutoSave)
+		Storage.setAutosave(self.AutoSave, false)
 		showAutoSave(self.AutoSave, animate)
 		refreshNote()
 		self:_refreshConfigStatus()
@@ -8395,6 +8459,18 @@ function Library:AddConfigTab(name, icon)
 			self:Notify({Title = "Autoload", Body = "Cleared autoload config.", Type = "Info"})
 		end,
 	}
+	-- A config action that errors must say so: a silent failure looks exactly like a dead button.
+	for _, key in ipairs({"New", "Load", "Save", "Delete", "Set Autoload", "Clear Autoload"}) do
+		local inner = actions[key]
+		actions[key] = function(...)
+			local ok, err = pcall(inner, ...)
+			if not ok then
+				self._applying = false -- never leave the library frozen
+				print("[Glider] config " .. key .. " failed:", err)
+				self:Notify({Title = "Config Error", Body = tostring(key) .. " failed: " .. tostring(err), Type = "Error", Duration = 8})
+			end
+		end
+	end
 	self._configActions = actions
 
 	for i, spec in ipairs({{"New"}, {"Save", "primary"}, {"Load"}, {"Set Autoload"}}) do
