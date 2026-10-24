@@ -735,13 +735,14 @@ end
 
 local function guiParent(gui, hide)
 	local order = {}
+	-- PlayerGui first: every executor allows writing to it, and the ScreenGui has ResetOnSpawn = false
+	table.insert(order, LocalPlayer:WaitForChild("PlayerGui"))
 	if hide then
+		local okCore, core = pcall(function() return game:GetService("CoreGui") end)
+		if okCore and core then table.insert(order, core) end
 		local ok, hui = pcall(function() return gethui and gethui() end)
 		if ok and typeof(hui) == "Instance" then table.insert(order, hui) end
 	end
-	local okCore, core = pcall(function() return game:GetService("CoreGui") end)
-	if okCore and core then table.insert(order, core) end
-	table.insert(order, LocalPlayer:WaitForChild("PlayerGui"))
 	for _, parent in ipairs(order) do
 		if canWriteUnder(gui, parent) then return parent end
 	end
