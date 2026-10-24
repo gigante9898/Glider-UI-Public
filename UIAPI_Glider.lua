@@ -3284,10 +3284,15 @@ function Library:AddTab(name, icon, pinned)
 	return tab
 end
 
+-- 2.0.3: decoration setters are called from widget callbacks, so a restricted executor refusing the
+-- write ("cannot access 'Instance' (lacking capability Plugin)") must never abort the caller. Every
+-- one of these is cosmetic: swallow the failure and let the caller's real work continue.
 function Tab:SetBadge(text)
 	if not self.Badge then return end
-	self.Badge.Text = tostring(text or "")
-	self.Badge.Visible = text ~= nil and text ~= ""
+	pcall(function()
+		self.Badge.Text = tostring(text or "")
+		self.Badge.Visible = text ~= nil and text ~= ""
+	end)
 end
 
 -- ---------------------------------------------------------------------------
@@ -3522,7 +3527,7 @@ function Tab:AddSubTab(name, icon, opts)
 		Size = UDim2.fromOffset(5, 5), Position = UDim2.new(1, 4, 0, 9), AnchorPoint = Vector2.new(0, 0.5),
 		BorderSizePixel = 0, Visible = false, Parent = sub.Button,
 	}, {BackgroundColor3 = "Accent"}, {corner(3)})
-	function sub:SetMarked(on) dot.Visible = on == true end
+	function sub:SetMarked(on) pcall(function() dot.Visible = on == true end) end
 
 	sub.Page = create("Frame", {
 		Name = name,
@@ -3761,13 +3766,15 @@ local function setLocked(el, locked)
 	local f = el.Frame
 	el.Locked = locked == true
 	if not f then return end
-	if el.Locked and not el._lock then
-		el._lock = make("TextButton", {
-			Text = "", AutoButtonColor = false, BorderSizePixel = 0, BackgroundTransparency = 0.4,
-			Size = UDim2.fromScale(1, 1), ZIndex = 60, Parent = f,
-		}, {BackgroundColor3 = "PageBg"})
-	end
-	if el._lock then el._lock.Visible = el.Locked end
+	pcall(function()
+		if el.Locked and not el._lock then
+			el._lock = make("TextButton", {
+				Text = "", AutoButtonColor = false, BorderSizePixel = 0, BackgroundTransparency = 0.4,
+				Size = UDim2.fromScale(1, 1), ZIndex = 60, Parent = f,
+			}, {BackgroundColor3 = "PageBg"})
+		end
+		if el._lock then el._lock.Visible = el.Locked end
+	end)
 end
 
 
@@ -7290,9 +7297,11 @@ function Tab:AddCard(opts)
 		subLbl.Visible = t ~= nil and t ~= ""
 	end
 	function card:SetBadge(text, role)
-		if text == nil or text == "" then badge.Frame.Visible = false return end
-		badge.Frame.Visible = true
-		setChip(badge, text, role or "Accent")
+		pcall(function()
+			if text == nil or text == "" then badge.Frame.Visible = false return end
+			badge.Frame.Visible = true
+			setChip(badge, text, role or "Accent")
+		end)
 	end
 	function card:SetAccent(role)
 		accentRole = role or "Accent"
