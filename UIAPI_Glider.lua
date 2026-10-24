@@ -710,18 +710,40 @@ local function makeDraggable(frame, handle)
 	end)
 end
 
--- Protected GUI parenting helper
-local function guiParent(gui)
-	if syn and syn.protect_gui then pcall(syn.protect_gui, gui)
-	elseif protectgui then pcall(protectgui, gui) end
-	local ok, hui = pcall(function() return gethui and gethui() end)
-	if ok and typeof(hui) == "Instance" then return hui end
+-- 2.0.4: never parent the tree inside a plugin-owned container (gethui()) by default.
+-- Children created under gethui() by a thread without Plugin capability cannot be written
+-- afterwards: every el:Set, SetMarked, badge, lock or refresh write throws
+-- "The current thread cannot access 'Instance' (lacking capability Plugin)". Lua state still
+-- updates, so a load "applies but the menu keeps showing the default" and every config action
+-- dies with a capability error. PlayerGui (and CoreGui when it accepts writes) are safe.
+-- opts.HideGui = true opts back in to gethui() for executors where that path does work.
+local function canWriteUnder(gui, parent)
+	local prev = gui.Parent
+	local ok = pcall(function() gui.Parent = parent end)
+	if not ok then return false end
+	local probe = Instance.new("Frame")
+	local writable = pcall(function()
+		probe.Parent = gui
+		probe.Visible = true
+		probe.Visible = false
+		probe.Size = UDim2.fromOffset(4, 4)
+	end)
+	probe:Destroy()
+	if not writable then pcall(function() gui.Parent = prev end) end
+	return writable
+end
+
+local function guiParent(gui, hide)
+	local order = {}
+	if hide then
+		local ok, hui = pcall(function() return gethui and gethui() end)
+		if ok and typeof(hui) == "Instance" then table.insert(order, hui) end
+	end
 	local okCore, core = pcall(function() return game:GetService("CoreGui") end)
-	if okCore and core then
-		local probe = Instance.new("Folder")
-		local canParent = pcall(function() probe.Parent = core end)
-		probe:Destroy()
-		if canParent then return core end
+	if okCore and core then table.insert(order, core) end
+	table.insert(order, LocalPlayer:WaitForChild("PlayerGui"))
+	for _, parent in ipairs(order) do
+		if canWriteUnder(gui, parent) then return parent end
 	end
 	return LocalPlayer:WaitForChild("PlayerGui")
 end
@@ -1367,7 +1389,7 @@ function Library.new(opts)
 		-- Above the touch thumbstick/jump buttons so the menu covers them.
 		DisplayOrder = 999,
 	})
-	self.Gui.Parent = guiParent(self.Gui)
+	self.Gui.Parent = guiParent(self.Gui, opts.HideGui == true)
 
 	-- Free-mouse shield: full-screen and invisible, under everything else in this Gui. While the
 	-- menu is open it catches clicks meant for the world and, being Modal, releases first-person
